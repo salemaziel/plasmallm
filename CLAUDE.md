@@ -22,7 +22,9 @@ make check-translations
 make clean
 ```
 
-There is **no test suite, no linter, and no build step.** Verification is manual: `make install-dev`, restart Plasma, exercise the feature, and read `journalctl`. Do not claim a change works without doing that or saying you didn't.
+There is **no linter and no build step.** `make test` runs `tests/` — plain Node scripts over the `.pragma library` JavaScript (wire formats, SSE parsing, tool-call normalization, the memory store). Node is a development-time requirement only; nothing there ships.
+
+**QML is not covered and cannot be** — it needs a running shell. For anything touching `main.qml` or a config page, verification is still manual: `make install-dev`, restart Plasma, exercise the feature, and read `journalctl`. Do not claim a change works without doing that or saying you didn't. `make test` passing is not evidence that the widget loads.
 
 `make package` hard-fails if any `package/contents/locale/*.po` has untranslated *or* fuzzy strings, and `do-package` blocks on an interactive `read` prompt — neither is usable unattended. Adding an `i18n()` string does **not** require updating the `.po` files (the maintainer fills them in at release prep); use `make package-no-i18n` if you need an artifact.
 

@@ -18,7 +18,7 @@ JUNK_DIRS := .omc
 ZIP_EXCLUDES := $(foreach d,$(JUNK_DIRS),--exclude "*/$(d)/*" --exclude "*/$(d)")
 FIND_JUNK := $(foreach d,$(JUNK_DIRS),-name '$(d)' -o) -false
 
-.PHONY: all package package-no-i18n do-package translations install install-dev remove clean check-translations
+.PHONY: all package package-no-i18n do-package translations install install-dev remove clean check-translations test
 
 all: package
 
@@ -110,6 +110,11 @@ install-dev:
 	@rm -rf $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@ln -sfv $$(pwd)/$(PACKAGE_DIR) $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@echo "Dev install complete. Restart Plasma to load: plasmashell --replace &"
+
+# Covers the .pragma library JavaScript only — QML needs a running shell and is
+# still verified by hand. Requires node, at development time only.
+test:
+	@./tests/run.sh
 
 remove:
 	@echo "Removing PlasmaLLM..."

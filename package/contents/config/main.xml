@@ -190,6 +190,18 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
       <label>Auto-save chat history</label>
       <default>false</default>
     </entry>
+    <entry name="memoryEnabled" type="Bool">
+      <label>Inject saved memories into the system prompt</label>
+      <default>true</default>
+    </entry>
+    <entry name="memoryAutoRun" type="Bool">
+      <label>Let the assistant save and delete memories without asking</label>
+      <default>true</default>
+    </entry>
+    <entry name="memoryRevision" type="Int">
+      <label>Bumped when memories are edited in settings, so the widget reloads them</label>
+      <default>0</default>
+    </entry>
     <entry name="showNotificationsMinimized" type="Bool">
       <label>Show desktop notifications for new messages/tool calls when chat is minimized</label>
       <default>true</default>

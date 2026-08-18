@@ -21,6 +21,7 @@ import "stt.js" as Stt
 import "contextCompactor.js" as ContextCompactor
 import "legacyChatLoader.js" as LegacyChatLoader
 import "toolCallNormalizer.js" as ToolCallNormalizer
+import "memoryStore.js" as MemoryStore
 
 PlasmoidItem {
     id: root
@@ -1264,6 +1265,15 @@ PlasmoidItem {
     }
 
     property var historyFetchCommands: ([])
+
+    // --- Long-term memory -------------------------------------------------
+    // Durable facts, injected into the system prompt every request. The array is
+    // the source of truth in memory; memories.jsonl is rewritten whole on every
+    // change (the set is capped at MemoryStore.MAX_MEMORIES, so this stays cheap
+    // and avoids append/rewrite races between the two).
+    property var memories: ([])
+    property var memoryLoadCommands: ([])
+    property bool memoriesLoaded: false
     property var pendingHistoryLoads: ({})
     property string lastHistoryFetchSource: ""
     property bool isFetchingHistory: false
@@ -1368,6 +1378,16 @@ PlasmoidItem {
                     isChunkSaving = false;
                     pumpChunkSaveQueue();
                 }
+            } else if (memoryLoadCommands.indexOf(source) !== -1) {
+                memoryLoadCommands.splice(memoryLoadCommands.indexOf(source), 1);
+                disconnectSource(source);
+                var parsedMem = MemoryStore.parseJsonl(stdout);
+                root.memories = parsedMem.memories;
+                root.memoriesLoaded = true;
+                if (parsedMem.skipped > 0) {
+                    console.warn("PlasmaLLM: skipped " + parsedMem.skipped + " unreadable memory line(s)");
+                }
+                if (systemPromptReady) initSystemPrompt();
             } else if (historyFetchCommands.indexOf(source) !== -1) {
                 historyFetchCommands.splice(historyFetchCommands.indexOf(source), 1);
                 if (source === lastHistoryFetchSource) {
@@ -1570,6 +1590,97 @@ PlasmoidItem {
         };
     }
 
+    function memoryFilePath() {
+        var dataHome = sysInfo.xdgDataHome || "${XDG_DATA_HOME:-$HOME/.local/share}";
+        return dataHome + "/plasmallm/memories.jsonl";
+    }
+
+    function loadMemories() {
+        var path = memoryFilePath();
+        // `cat` a missing file is not an error here — first run simply has none.
+        var cmd = "cat \"" + path + "\" 2>/dev/null || true";
+        memoryLoadCommands.push(cmd);
+        executable.connectSource(cmd);
+    }
+
+    function persistMemories() {
+        var path = memoryFilePath();
+        var dataHome = sysInfo.xdgDataHome || "${XDG_DATA_HOME:-$HOME/.local/share}";
+        var text = MemoryStore.serializeJsonl(root.memories);
+        var escaped = text.replace(/'/g, "'\\''");
+        var cmd = "mkdir -p \"" + dataHome + "/plasmallm\" && printf '%s' '" + escaped + "' > \"" + path + "\"";
+        saveCommands.push(cmd);
+        executable.connectSource(cmd);
+    }
+
+    function addMemory(text, source, opts) {
+        var result = MemoryStore.addMemory(root.memories, text, new Date().toISOString(), source || "", opts);
+        if (result.added) {
+            root.memories = result.memories;
+            persistMemories();
+            initSystemPrompt();
+        }
+        return {
+            added: result.added,
+            id: result.id,
+            reason: result.reason,
+            pinned: result.pinned,
+            text: text
+        };
+    }
+
+    // Search the archive for the recall tool. Surfacing an entry counts as a
+    // use, which nudges it up the ranking next time — persisted, but the
+    // system prompt is untouched because archived entries never appear there.
+    function searchMemories(query) {
+        var found = MemoryStore.searchMemories(root.memories, query);
+        var ids = [];
+        for (var i = 0; i < found.results.length; i++) {
+            ids.push(found.results[i].memory.id);
+        }
+        if (ids.length > 0) {
+            var marked = MemoryStore.markUsed(root.memories, ids, new Date().toISOString());
+            if (marked.changed) {
+                root.memories = marked.memories;
+                persistMemories();
+            }
+        }
+        return {
+            text: MemoryStore.formatSearchResults(found.results, {
+                empty: i18n("No saved memory matched that query. %1 archived entries were searched.", found.scanned),
+                header: i18n("Recalled from long-term memory:")
+            }),
+            count: found.results.length,
+            scanned: found.scanned
+        };
+    }
+
+    function setMemoryPinned(id, pinned) {
+        var result = MemoryStore.setPinned(root.memories, id, pinned);
+        if (result.changed) {
+            root.memories = result.memories;
+            persistMemories();
+            initSystemPrompt();
+        }
+        return result;
+    }
+
+    function removeMemory(target) {
+        var result = MemoryStore.removeMemory(root.memories, target);
+        if (result.removed) {
+            root.memories = result.memories;
+            persistMemories();
+            initSystemPrompt();
+        }
+        return result;
+    }
+
+    function clearMemories() {
+        root.memories = [];
+        persistMemories();
+        initSystemPrompt();
+    }
+
     function initSystemPrompt() {
         var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
             i18n: i18n,
@@ -1579,7 +1690,8 @@ PlasmoidItem {
             commandToolEnabled: Plasmoid.configuration.useCommandTool, 
             sessionMultiplexer: root.sessionChipText(),
             localizeSystemPrompt: Plasmoid.configuration.localizeSystemPrompt,
-            toolsConfig: getToolsConfig()
+            toolsConfig: getToolsConfig(),
+            memories: Plasmoid.configuration.memoryEnabled ? root.memories : []
         });
         Plasmoid.configuration.gatheredSysInfo = JSON.stringify(sysInfo);
         if (systemPromptReady) {
@@ -3479,6 +3591,12 @@ PlasmoidItem {
             getAttachmentInfo: function(target) {
                 return root.getAttachmentInfo(target);
             },
+            memory: {
+                add: function(text, opts) { return root.addMemory(text, "assistant", opts); },
+                remove: function(target) { return root.removeMemory(target); },
+                search: function(query) { return root.searchMemories(query); },
+                list: function() { return root.memories.slice(); }
+            },
             setTimeout: function(cb, delay) {
                 var t = Qt.createQmlObject("import QtQml 2.0; Timer { interval: " + delay + "; repeat: false; }", root);
                 t.triggered.connect(function() {
@@ -3893,6 +4011,11 @@ PlasmoidItem {
     Connections {
         target: Plasmoid.configuration
         function onSystemPromptChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onMemoryEnabledChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onMemoryAutoRunChanged() { if (systemPromptReady) initSystemPrompt(); }
+        // Settings edits memories.jsonl in its own QML context and bumps this
+        // counter; re-read rather than trusting the stale in-memory list.
+        function onMemoryRevisionChanged() { loadMemories(); }
         function onCustomToolsChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onEnableToolsChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onAutoRunCommandsChanged() { if (systemPromptReady) initSystemPrompt(); }
@@ -4086,6 +4209,11 @@ PlasmoidItem {
     Component.onCompleted: {
         // Keep profile defaults in sync with the canonical template from api.js.
         Profiles.setDefaultSystemPromptTemplate(Api.DEFAULT_SYSTEM_PROMPT_TEMPLATE);
+
+        // Long-term memory. The path falls back to a shell-expanded
+        // ${XDG_DATA_HOME:-...} when sysInfo has not been gathered yet, so this
+        // is safe to kick off before the system-info sweep finishes.
+        loadMemories();
 
         // One-time: migrate legacy sttProfileId (chat profile pointer) → dedicated STT fields.
         if (!Plasmoid.configuration.sttMigratedFromProfile) {

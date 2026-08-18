@@ -228,6 +228,14 @@ function getEnabledTools(config) {
         enabled.push("restore_context");
         enabled.push("recall_attachment");
     }
+    // One switch drives both halves of memory: the tools that write it and the
+    // system-prompt section that reads it. Enabling one without the other only
+    // produces confusing behaviour.
+    if (config.memoryEnabled) {
+        enabled.push("remember");
+        enabled.push("forget");
+        enabled.push("recall");
+    }
 
     if (config.enableDesktopAutomation) {
         enabled.push("StartSession");
@@ -269,6 +277,11 @@ function isAutoRun(toolId, config) {
         case "set_clipboard": return config.toolsSetClipboardAutoRun;
         case "notify": return config.toolsNotifyAutoRun;
         case "open_url": return config.toolsOpenUrlAutoRun;
+        case "remember": return config.memoryAutoRun;
+        case "forget": return config.memoryAutoRun;
+        // Read-only search of the user's own saved facts; gating it behind an
+        // approval card would just make the model stop using it.
+        case "recall": return true;
     }
     var custom = getCustomTools(config);
     for (var i = 0; i < custom.length; i++) {

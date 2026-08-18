@@ -19,6 +19,9 @@
 .import "WebSearch.js" as WebSearch
 .import "RestoreContext.js" as RestoreContext
 .import "RecallAttachment.js" as RecallAttachment
+.import "Remember.js" as Remember
+.import "Forget.js" as Forget
+.import "Recall.js" as Recall
 
 .import "driver/StartSession.js" as StartSession
 .import "driver/DesktopGetState.js" as DesktopGetState
@@ -36,6 +39,9 @@ var tools = [
     { module: WebSearch, configUI: "tools/WebSearchConfig.qml" },
     { module: RestoreContext, configUI: "tools/RestoreContextConfig.qml" },
     { module: RecallAttachment, configUI: "" },
+    { module: Remember, configUI: "" },
+    { module: Forget, configUI: "" },
+    { module: Recall, configUI: "" },
     { module: ReadFile, configUI: "tools/ReadFileConfig.qml" },
     { module: WriteFile, configUI: "tools/WriteFileConfig.qml" },
     { module: ListDir, configUI: "tools/ListDirConfig.qml" },

@@ -33,6 +33,11 @@ ConfigModel {
         source: "configSystemPrompt.qml"
     }
     ConfigCategory {
+        name: i18n("Memory")
+        icon: "bookmarks"
+        source: "configMemory.qml"
+    }
+    ConfigCategory {
         name: i18n("Tasks")
         icon: "view-task"
         source: "configTasks.qml"

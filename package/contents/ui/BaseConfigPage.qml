@@ -409,6 +409,13 @@ SimpleKCM {
     property string cfg_customTools
     property string cfg_customToolsDefault
 
+    property bool cfg_memoryEnabled
+    property bool cfg_memoryEnabledDefault
+    property bool cfg_memoryAutoRun
+    property bool cfg_memoryAutoRunDefault
+    property int cfg_memoryRevision
+    property int cfg_memoryRevisionDefault
+
     property bool cfg_compactionEnabled
     property bool cfg_compactionEnabledDefault
     property string cfg_compactionProfileId

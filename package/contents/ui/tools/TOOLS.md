@@ -77,6 +77,16 @@ PlasmaLLM automatically parses your `Command Template`, identifies the parameter
 - **`notify`**: Send a system notification via `notify-send`.
 - **`open_url`**: Open a URL or file in the default application via `xdg-open`.
 
+### Context & Memory Tools
+These read or write the assistant's own state rather than the system, so they are gated by the feature that owns them rather than by the per-tool switches on the Tools page.
+
+- **`restore_context` / `recall_attachment`**: Pull the verbatim text of compacted messages, or the full contents of an attached file, back into context. Enabled with context compaction. (`uiHidden`)
+- **`remember`**: Save a durable fact to long-term memory. Optionally tagged, and pinned into the system prompt if the pinned budget has room. (Side-effect)
+- **`forget`**: Delete a saved memory by id or by a distinctive phrase. (Side-effect)
+- **`recall`**: Search the archived (unpinned) memories by keyword. Read-only and always auto-run — an approval card on a search the model needs before it can answer just teaches it to stop searching. (`uiHidden`)
+
+All three memory tools are enabled together by `memoryEnabled`; `remember` and `forget` follow `memoryAutoRun`.
+
 ### Desktop Automation Tools
 - **`StartSession`**: Initializes a Remote Desktop Wayland session and authorization token exchange.
 - **`DesktopGetState`**: Unified tool that retrieves the current visual screenshot (optionally cropped to operating context) and the active window list + interactive accessibility element tree.

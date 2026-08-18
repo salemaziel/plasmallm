@@ -383,6 +383,10 @@ Kirigami.AbstractCard {
                         wrapMode: Text.Wrap
                         font.family: root.thoughtsFontFamily
                         font.pointSize: root.thoughtsFontPointSize
+                        // Italic separates reasoning from the reply at a glance,
+                        // which matters for providers that stream long thoughts
+                        // in the same visual weight as their answer.
+                        font.italic: true
                         opacity: 0.8
                     }
                 }

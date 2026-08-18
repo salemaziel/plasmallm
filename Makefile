@@ -11,6 +11,13 @@ PO_FILES := $(wildcard $(LOCALE_DIR)/*.po)
 MO_FILES := $(patsubst $(LOCALE_DIR)/%.po,$(LOCALE_DIR)/%/LC_MESSAGES/$(DOMAIN).mo,$(PO_FILES))
 SRC_FILES := $(shell find $(PACKAGE_DIR)/contents/ui $(PACKAGE_DIR)/contents/config -type f -name '*.qml' -o -name '*.js')
 
+# Agent/editor scratch directories that appear inside $(PACKAGE_DIR) during
+# development. Plasma loads whatever is in the package, and zip -r takes the
+# whole tree, so these have to be stripped explicitly or they ship.
+JUNK_DIRS := .omc
+ZIP_EXCLUDES := $(foreach d,$(JUNK_DIRS),--exclude "*/$(d)/*" --exclude "*/$(d)")
+FIND_JUNK := $(foreach d,$(JUNK_DIRS),-name '$(d)' -o) -false
+
 .PHONY: all package package-no-i18n do-package translations install install-dev remove clean check-translations
 
 all: package
@@ -85,7 +92,7 @@ do-package:
 	OUTPUT="PlasmaLLM-$${FINAL_VERSION}.plasmoid"; \
 	echo "Building package $$OUTPUT..."; \
 	rm -f "$$OUTPUT"; \
-	cd $(PACKAGE_DIR) && zip -r "../$$OUTPUT" . --exclude "contents/locale/*.po" --exclude "contents/locale/*.pot"; \
+	cd $(PACKAGE_DIR) && zip -r "../$$OUTPUT" . --exclude "contents/locale/*.po" --exclude "contents/locale/*.pot" $(ZIP_EXCLUDES); \
 	echo "Created $$OUTPUT"
 
 # Install
@@ -94,6 +101,7 @@ install:
 	@mkdir -p $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@rm -rf $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@cp -rv $(PACKAGE_DIR) $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
+	@find $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID) -type d \( $(FIND_JUNK) \) -prune -exec rm -rf {} +
 	@echo "Install complete. Restart Plasma to load: plasmashell --replace &"
 
 install-dev:

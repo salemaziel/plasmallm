@@ -8,4 +8,5 @@ reference/
 *.plasmoid
 .antigravitycli/
 __pycache__/
+.omc/
 

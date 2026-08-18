@@ -4,6 +4,7 @@
 */
 
 .import "../toolManager.js" as ToolManager
+.import "../toolCallNormalizer.js" as ToolCallNormalizer
 
 // Native Google Gemini adapter (POST /v1beta/models/{model}:streamGenerateContent
 // ?alt=sse, GET /v1beta/models). Translates the host's OpenAI-shaped neutral
@@ -601,8 +602,10 @@ function sendStreaming(opts) {
             console.error("PlasmaLLM Gemini Adapter: onComplete with error:", error);
             onComplete(accumulatedText, error, null, null);
         } else if (accumulatedToolCalls.length > 0) {
-            var assistantMsg = { role: "assistant", content: accumulatedText || null, tool_calls: accumulatedToolCalls, thinkingBlocks: collectedThinking };
-            onComplete(accumulatedText, null, accumulatedToolCalls, assistantMsg);
+            var normalized = ToolCallNormalizer.normalizeToolCalls(accumulatedToolCalls);
+            ToolCallNormalizer.logNotes("gemini", normalized.notes);
+            var assistantMsg = { role: "assistant", content: accumulatedText || null, tool_calls: normalized.calls, thinkingBlocks: collectedThinking };
+            onComplete(accumulatedText, null, normalized.calls, assistantMsg);
         } else if (accumulatedText.length > 0 || collectedThinking.length > 0) {
             onComplete(accumulatedText, null, null, { role: "assistant", content: accumulatedText, thinkingBlocks: collectedThinking });
         } else {

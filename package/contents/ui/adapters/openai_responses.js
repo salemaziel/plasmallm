@@ -4,6 +4,7 @@
 */
 
 .import "../toolManager.js" as ToolManager
+.import "../toolCallNormalizer.js" as ToolCallNormalizer
 
 // Responses API strategy for the OpenAI-compatible adapter.
 // Dispatched by openai.js when the active provider speaks /v1/responses
@@ -522,13 +523,15 @@ function sendStreaming(opts) {
             console.error("PlasmaLLM OpenAI Responses Adapter: onComplete with error:", error);
             onComplete(accumulatedText, error, null, null);
         } else if (accumulatedToolCalls.length > 0) {
+            var normalized = ToolCallNormalizer.normalizeToolCalls(accumulatedToolCalls);
+            ToolCallNormalizer.logNotes("openai_responses", normalized.notes);
             var assistantMsg = {
                 role: "assistant",
                 content: accumulatedText || null,
-                tool_calls: accumulatedToolCalls,
+                tool_calls: normalized.calls,
                 thinkingBlocks: thinkingBlocks
             };
-            onComplete(accumulatedText, null, accumulatedToolCalls, assistantMsg);
+            onComplete(accumulatedText, null, normalized.calls, assistantMsg);
         } else if (accumulatedText.length > 0 || thinkingBlocks.length > 0) {
             onComplete(accumulatedText, null, null, {
                 role: "assistant",

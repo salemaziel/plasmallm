@@ -4,6 +4,7 @@
 */
 
 .import "../toolManager.js" as ToolManager
+.import "../toolCallNormalizer.js" as ToolCallNormalizer
 
 // Google Gemini Interactions API adapter (POST /v1beta/interactions?alt=sse).
 // Stateful implementation using server-side interaction storage.
@@ -551,8 +552,10 @@ function sendStreaming(opts) {
                 if (xhr.status === 200) {
                     var assistantMsg = { role: "assistant", content: accumulatedText || null, thinkingBlocks: thinkingBlocks };
                     if (accumulatedToolCalls.length > 0) {
-                        assistantMsg.tool_calls = accumulatedToolCalls;
-                        opts.onComplete(accumulatedText, null, accumulatedToolCalls, assistantMsg);
+                        var normalized = ToolCallNormalizer.normalizeToolCalls(accumulatedToolCalls);
+                        ToolCallNormalizer.logNotes("gemini_interactions", normalized.notes);
+                        assistantMsg.tool_calls = normalized.calls;
+                        opts.onComplete(accumulatedText, null, normalized.calls, assistantMsg);
                     } else {
                         opts.onComplete(accumulatedText, null, null, assistantMsg);
                     }

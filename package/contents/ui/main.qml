@@ -20,6 +20,7 @@ import "driverManager.js" as DriverManager
 import "stt.js" as Stt
 import "contextCompactor.js" as ContextCompactor
 import "legacyChatLoader.js" as LegacyChatLoader
+import "toolCallNormalizer.js" as ToolCallNormalizer
 
 PlasmoidItem {
     id: root
@@ -3104,11 +3105,21 @@ PlasmoidItem {
                 } catch(e) {}
             }
             var entry = { role: msg.role, content: msgContent };
-            // Reconstruct tool_calls on assistant messages
+            // Reconstruct tool_calls on assistant messages. Conversations saved
+            // before tool-call normalization existed can hold malformed
+            // arguments strings; repair on read so an old chat is not stuck
+            // failing forever on replay.
             if (msg.tool_calls_json && msg.tool_calls_json.length > 0) {
-                try {
-                    entry.tool_calls = JSON.parse(msg.tool_calls_json);
-                } catch(e) {}
+                var healed = ToolCallNormalizer.sanitizeStoredToolCallsJson(msg.tool_calls_json);
+                if (healed && healed.length > 0) {
+                    try {
+                        entry.tool_calls = JSON.parse(healed);
+                    } catch(e) {}
+                    if (healed !== msg.tool_calls_json) {
+                        console.warn("PlasmaLLM: repaired stored tool_calls on message " + (msg.msgId || i));
+                        chatMessages.setProperty(i, "tool_calls_json", healed);
+                    }
+                }
             }
             // Reconstruct thinking blocks (with provider-specific signatures)
             // so the adapter can prepend them in the next request — required
@@ -3131,6 +3142,13 @@ PlasmoidItem {
             var systemMsg = messages[0];
             messages = [systemMsg].concat(messages.slice(messages.length - maxApiMessages));
         }
+
+        // Compaction and the slice above can separate a tool call from its
+        // result. Providers reject either half on its own, so drop unpaired
+        // calls and results before the request goes out.
+        var reconciled = ToolCallNormalizer.reconcileToolCallMessages(messages);
+        ToolCallNormalizer.logNotes("sendToLLM", reconciled.notes);
+        messages = reconciled.messages;
 
         var tools = Api.buildTools(root.effectiveApiType, {
             webSearchProvider: Plasmoid.configuration.webSearchProvider,

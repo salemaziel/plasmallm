@@ -4,6 +4,7 @@
 */
 
 .import "../toolManager.js" as ToolManager
+.import "../toolCallNormalizer.js" as ToolCallNormalizer
 
 // Chat Completions strategy for the OpenAI-compatible adapter.
 // Dispatched by openai.js when the active provider does not use the
@@ -227,6 +228,7 @@ function sendStreaming(opts) {
     var lastParseIndex = 0;
     var accumulatedText = "";
     var accumulatedToolCalls = []; // [{id, type, function: {name, arguments}}]
+    var toolCallSlots = {};        // "i<index>" / "d<id>" -> position in accumulatedToolCalls
     var accumulatedThinkingText = "";
     var accumulatedCitations = [];
     var streamDone = false;
@@ -240,6 +242,55 @@ function sendStreaming(opts) {
                 accumulatedCitations.push(item);
             }
         }
+    }
+
+    // Decide which accumulator slot a tool_calls delta belongs to.
+    //
+    // Providers are inconsistent here. Captured from OpenCode Go's gateway:
+    //   glm-5.3     one complete call per delta, indices 0 and 1
+    //   minimax-m3  id on the opening delta, fragments after, indices correct
+    //   kimi-k3     empty opener then ~15 token-sized fragments per call
+    //   gpt-5.6-luna  BOTH parallel calls on index 0, distinguished only by id
+    //
+    // That last shape is why this cannot key on `index` alone: doing so merges
+    // the calls into one named "read_filelist_dir" whose arguments are two JSON
+    // objects concatenated — which strict upstreams reject with "invalid
+    // function arguments json string". Resolve by id first, fall back to index,
+    // and treat a new id arriving on an occupied slot as a new call.
+    function resolveToolCallSlot(tcd) {
+        var hasIndex = (tcd.index !== undefined && tcd.index !== null);
+
+        if (tcd.id) {
+            var byId = toolCallSlots["d" + tcd.id];
+            if (byId !== undefined) return byId;
+        }
+
+        if (hasIndex) {
+            var byIdx = toolCallSlots["i" + tcd.index];
+            if (byIdx !== undefined) {
+                var held = accumulatedToolCalls[byIdx];
+                // Same index, different id => the provider is reusing the index
+                // across parallel calls. Open a fresh slot instead of merging.
+                if (!(tcd.id && held.id && held.id !== tcd.id)) {
+                    if (tcd.id) toolCallSlots["d" + tcd.id] = byIdx;
+                    return byIdx;
+                }
+            }
+        } else if (!tcd.id && accumulatedToolCalls.length > 0) {
+            // Continuation fragment with neither index nor id: it belongs to the
+            // call currently being streamed.
+            return accumulatedToolCalls.length - 1;
+        }
+
+        var pos = accumulatedToolCalls.length;
+        accumulatedToolCalls.push({
+            id: tcd.id || "",
+            type: tcd.type || "function",
+            "function": { name: "", arguments: "" }
+        });
+        if (hasIndex) toolCallSlots["i" + tcd.index] = pos;
+        if (tcd.id) toolCallSlots["d" + tcd.id] = pos;
+        return pos;
     }
 
     function processBuffer() {
@@ -268,23 +319,31 @@ function sendStreaming(opts) {
             if (tok.tool_calls_delta) {
                 for (var t = 0; t < tok.tool_calls_delta.length; t++) {
                     var tcd = tok.tool_calls_delta[t];
-                    var idx = tcd.index !== undefined ? tcd.index : 0;
-                    if (!accumulatedToolCalls[idx]) {
-                        accumulatedToolCalls[idx] = {
-                            id: tcd.id || ("call_" + Math.random().toString(36).substring(2, 10)),
-                            type: tcd.type || "function",
-                            "function": { name: "", arguments: "" }
-                        };
-                    }
-                    if (tcd.id) accumulatedToolCalls[idx].id = tcd.id;
+                    var idx = resolveToolCallSlot(tcd);
+                    var slot = accumulatedToolCalls[idx];
+
+                    if (tcd.id) slot.id = tcd.id;
+                    if (tcd.type) slot.type = tcd.type;
+
                     if (tcd["function"]) {
-                        if (tcd["function"].name) accumulatedToolCalls[idx]["function"].name += tcd["function"].name;
-                        if (tcd["function"].arguments) {
-                            var deltaArgs = tcd["function"].arguments;
-                            if (typeof deltaArgs === "object") {
-                                try { deltaArgs = JSON.stringify(deltaArgs); } catch(e) { deltaArgs = ""; }
+                        var deltaName = tcd["function"].name;
+                        if (deltaName) {
+                            // Providers that repeat the complete call on every
+                            // chunk would otherwise yield "read_fileread_file".
+                            if (slot["function"].name !== deltaName) {
+                                slot["function"].name += deltaName;
                             }
-                            accumulatedToolCalls[idx]["function"]["arguments"] += deltaArgs;
+                        }
+
+                        var deltaArgs = tcd["function"].arguments;
+                        if (deltaArgs !== undefined && deltaArgs !== null && deltaArgs !== "") {
+                            if (typeof deltaArgs === "object") {
+                                // An object delta is always the complete argument
+                                // set, never a fragment — replace, do not append.
+                                try { slot["function"].arguments = JSON.stringify(deltaArgs); } catch (e) {}
+                            } else {
+                                slot["function"].arguments += deltaArgs;
+                            }
                         }
                     }
                 }
@@ -331,10 +390,19 @@ function sendStreaming(opts) {
         }
 
         if (accumulatedToolCalls.length > 0) {
-            if (accumulatedCitations.length > 0) formatCitations();
-            var assistantMsg = { role: "assistant", content: accumulatedText || null, tool_calls: accumulatedToolCalls };
-            onComplete(accumulatedText, null, accumulatedToolCalls, assistantMsg);
-            return;
+            // Never hand a malformed tool_calls array upstream: it is replayed on
+            // every later request in the conversation, so one bad chunk would
+            // otherwise wedge the whole session.
+            var normalized = ToolCallNormalizer.normalizeToolCalls(accumulatedToolCalls);
+            ToolCallNormalizer.logNotes("openai_chat", normalized.notes);
+
+            if (normalized.calls.length > 0) {
+                if (accumulatedCitations.length > 0) formatCitations();
+                var assistantMsg = { role: "assistant", content: accumulatedText || null, tool_calls: normalized.calls };
+                onComplete(accumulatedText, null, normalized.calls, assistantMsg);
+                return;
+            }
+            // Every call was unusable — fall through and treat as a text reply.
         }
 
         if (accumulatedText.length > 0) {
@@ -355,15 +423,20 @@ function sendStreaming(opts) {
                 if (msg.citations && Array.isArray(msg.citations)) {
                     pushCitations(msg.citations);
                 }
+                var nonStreamCalls = null;
                 if (msg.tool_calls && msg.tool_calls.length > 0) {
+                    var nsNormalized = ToolCallNormalizer.normalizeToolCalls(msg.tool_calls);
+                    ToolCallNormalizer.logNotes("openai_chat/non-streaming", nsNormalized.notes);
+                    if (nsNormalized.calls.length > 0) nonStreamCalls = nsNormalized.calls;
+                }
+
+                if (nonStreamCalls) {
                     if (typeof msg.content === "string" && msg.content.length > 0) {
                         accumulatedText = msg.content;
                     }
                     if (accumulatedCitations.length > 0) formatCitations();
-                    if (accumulatedText.length > 0) {
-                        msg = { role: msg.role || "assistant", content: accumulatedText, tool_calls: msg.tool_calls };
-                    }
-                    onComplete(accumulatedText, null, msg.tool_calls, msg);
+                    msg = { role: msg.role || "assistant", content: accumulatedText, tool_calls: nonStreamCalls };
+                    onComplete(accumulatedText, null, nonStreamCalls, msg);
                 } else if (typeof msg.content === "string") {
                     accumulatedText = msg.content;
                     if (accumulatedCitations.length > 0) formatCitations();

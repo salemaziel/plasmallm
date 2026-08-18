@@ -4,6 +4,7 @@
 */
 
 .import "../toolManager.js" as ToolManager
+.import "../toolCallNormalizer.js" as ToolCallNormalizer
 
 // Native Anthropic Messages API adapter (POST /v1/messages, GET /v1/models).
 // Translates the host's OpenAI-shaped neutral form to/from Anthropic wire
@@ -410,8 +411,12 @@ function sendStreaming(opts) {
         if (error) {
             onComplete(accumulatedText, error, null, null);
         } else if (accumulatedToolCalls.length > 0) {
-            var assistantMsg = { role: "assistant", content: accumulatedText || null, tool_calls: accumulatedToolCalls, thinkingBlocks: thinkingBlocks };
-            onComplete(accumulatedText, null, accumulatedToolCalls, assistantMsg);
+            // A tool_use block with no input emits no input_json_delta at all,
+            // leaving arguments as "" — invalid JSON on the next request.
+            var normalized = ToolCallNormalizer.normalizeToolCalls(accumulatedToolCalls);
+            ToolCallNormalizer.logNotes("anthropic", normalized.notes);
+            var assistantMsg = { role: "assistant", content: accumulatedText || null, tool_calls: normalized.calls, thinkingBlocks: thinkingBlocks };
+            onComplete(accumulatedText, null, normalized.calls, assistantMsg);
         } else if (accumulatedText.length > 0 || thinkingBlocks.length > 0) {
             onComplete(accumulatedText, null, null, { role: "assistant", content: accumulatedText, thinkingBlocks: thinkingBlocks });
         } else {

@@ -10,7 +10,7 @@ PlasmaLLM is designed for quick tasks and system-integrated workflows—not as a
 
 ## Features
 
-- **Multi-Provider Support**: Connects to Ollama, LM Studio, OpenAI, Anthropic Claude, Google Gemini, and any OpenAI-compatible API.
+- **Multi-Provider Support**: Connects to Ollama, LM Studio, OpenAI, Anthropic Claude, Google Gemini, OpenCode Go, and any OpenAI-compatible API.
 - **System Awareness**: Optionally gathers hardware, OS, and environment info to provide context for assistant responses.
 - **Tool-Calling System**: Modular architecture allowing LLMs to interact with the filesystem, run shell commands, and fetch web data (with user approval).
 - **Interactive Terminal Blocks**: View, copy, or execute suggested terminal commands. Supports session multiplexing via `tmux` or `screen`.
@@ -43,6 +43,14 @@ PlasmaLLM is designed for quick tasks and system-integrated workflows—not as a
    - **Toggle**: click to start, click again to stop and send.
 7. Optional: set a **Voice shortcut** (default **Ctrl+M**) while the panel is open and focused. It follows the same **Mic button** mode (auto / hold / toggle). Clear the field to disable. To open the panel from elsewhere, use **Activate widget** on the dialog’s Shortcuts page.
 8. Your **active chat profile** (General page) is still used for the conversation; STT is only the speech engine.
+
+### OpenCode Go setup
+
+[OpenCode Go](https://opencode.ai/docs/go/) is a first-class provider — pick **OpenCode Go** in **Configure PlasmaLLM → General**, paste the key from [opencode.ai/auth](https://opencode.ai/auth), and click **Fetch models**. The endpoint is fixed and the model list loads without a key.
+
+The gateway serves three wire formats from the same key — chat completions, Anthropic-style messages, and the OpenAI Responses API — and each model answers on only one of them. PlasmaLLM routes automatically: Qwen models go to `/messages`, Grok 4.5 and GPT 5.6 Luna to `/responses`, everything else to chat completions. If a model turns out to be routed differently, the request is retried on the remaining formats and the working one is remembered for the session, so the widget keeps up as OpenCode moves models between backends.
+
+A few models on the published list are not reachable in every account: the `deepseek-v4-*` models are China-region hosted and need explicit opt-in on your OpenCode account, while `mimo-v2-pro`, `mimo-v2-omni`, and `hy3-preview` are currently unserved upstream. PlasmaLLM reports each of these with a specific explanation rather than a raw gateway error.
 
 ---
 

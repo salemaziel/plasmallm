@@ -2950,6 +2950,12 @@ PlasmoidItem {
             if (!Plasmoid.configuration.modelName)
                 Plasmoid.configuration.modelName = "exa";
         }
+        // OpenCode Go has one fixed gateway; backfill it if Apply raced the
+        // adapter switch, so the first message does not fail on an empty field.
+        if (Plasmoid.configuration.apiType === "opencode") {
+            if (!Plasmoid.configuration.apiEndpoint)
+                Plasmoid.configuration.apiEndpoint = "https://opencode.ai/zen/go/v1";
+        }
 
         if (!Plasmoid.configuration.apiEndpoint || !Plasmoid.configuration.modelName) {
             displayMessages.append({

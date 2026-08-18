@@ -487,8 +487,10 @@ BaseConfigPage {
         // Skip automatic fetches when no key is set — some endpoints (e.g. local
         // LM Studio) don't need one, but we shouldn't hammer remote providers
         // with guaranteed-401 requests. The manual refresh button bypasses this.
-        // Exception: Exa exposes a static model list that does not require a key.
+        // Exception: Exa exposes a static model list, and OpenCode Go serves its
+        // /models list publicly — both can populate before a key is entered.
         var endpointText = apiEndpointField ? apiEndpointField.text : (cfg_apiEndpoint || "");
+        var isKeylessModelList = (cfg_apiType === "opencode");
         var isExaStatic = (cfg_apiType === "exa") || (function(ep) {
             if (!ep) return false;
             var m = String(ep).match(/^https?:\/\/([^\/:?#]+)/i);
@@ -496,7 +498,7 @@ BaseConfigPage {
             var host = m[1].toLowerCase();
             return host === "api.exa.ai" || host === "exa.ai" || (host.length > 7 && host.slice(-7) === ".exa.ai");
         })(endpointText);
-        if (!force && (!key || key.length === 0) && !isExaStatic) return;
+        if (!force && (!key || key.length === 0) && !isExaStatic && !isKeylessModelList) return;
         fetchInProgress = true;
         fetchStatusLabel.visible = false;
 

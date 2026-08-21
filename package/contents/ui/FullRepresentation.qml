@@ -403,14 +403,17 @@ PlasmaExtras.Representation {
 
             PlasmaComponents.ToolButton {
                 id: driveToolButton
-                icon.name: "input-mouse"
+                icon.name: root.isDrivingPending ? "view-refresh" : "input-mouse"
                 visible: Plasmoid.configuration.enableDesktopAutomation && root.isDriverServiceActive
                 checkable: true
                 checked: root.isDrivingActive
+                opacity: root.isDrivingPending ? 0.5 : 1.0
                 Accessible.name: i18n("Drive Desktop")
-                PlasmaComponents.ToolTip.text: root.isDrivingActive 
-                    ? i18n("Stop Driving Desktop (disconnect)") 
-                    : i18n("Drive Desktop (starts handshake and enables auto mode)")
+                PlasmaComponents.ToolTip.text: root.isDrivingActive
+                    ? i18n("Stop Driving Desktop (disconnect)")
+                    : (root.isDrivingPending
+                        ? i18n("Waiting for desktop automation consent…")
+                        : i18n("Drive Desktop (starts handshake and enables auto mode)"))
                 PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
                 PlasmaComponents.ToolTip.visible: hovered && PlasmaComponents.ToolTip.text !== ""
                 onClicked: {

@@ -94,7 +94,8 @@ function startSession(clientToken, callback) {
         path: "/com/joshuaroman/plasmallm/DesktopDriver",
         iface: "com.joshuaroman.plasmallm.DesktopDriver",
         member: "StartSession",
-        arguments: [clientToken || ""]
+        arguments: [clientToken || ""],
+        timeout: 90000
     }, function() {
         var args = Array.prototype.slice.call(arguments);
         var success = false;

@@ -159,11 +159,11 @@ function startSession(clientToken, callback) {
                 }
                 active = (active === true || active === "true");
                 
-                isSessionActive = true;
+                isSessionActive = (active === true);
                 if (callback) callback(null, token, active);
             }, function(err) {
-                isSessionActive = true;
-                if (callback) callback(null, token, false);
+                isSessionActive = false;
+                if (callback) callback({error: "IsSessionActive failed: " + err.message});
             });
         } else {
             if (callback) callback({error: "Session denied or invalid token received. Args: " + JSON.stringify(args)});

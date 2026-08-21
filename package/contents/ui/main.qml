@@ -236,6 +236,7 @@ PlasmoidItem {
     property bool isDriverServiceActive: false
     property bool isDrivingActive: false
     property bool isHandshakePending: false
+    property bool isDrivingPending: false
     readonly property bool isAutoMode: sessionAutoMode || sessionFullAutoMode
     property var fetchedModels: []
     property string apiKey: Plasmoid.configuration.apiKey
@@ -3975,20 +3976,24 @@ PlasmoidItem {
                         timestamp: root.currentTimestamp()
                     });
                     root.isDrivingActive = false;
+                    root.isDrivingPending = false;
+                    driverPendingTimeoutTimer.stop();
                 } else {
-                    root.isDrivingActive = true;
-                    var msg = isAlreadyAuthorized 
-                        ? i18n("Drive session active (already authorized). Auto mode enabled.")
-                        : i18n("Drive session authorized successfully. Auto mode enabled.");
-                    if (!isAlreadyAuthorized) {
+                    if (isAlreadyAuthorized === true) {
+                        root.isDrivingActive = true;
+                        root.isDrivingPending = false;
+                        driverPendingTimeoutTimer.stop();
+                        console.log("[PlasmaLLM] " + i18n("Drive session active (already authorized). Auto mode enabled."));
+                    } else {
+                        root.isDrivingActive = false;
+                        root.isDrivingPending = true;
+                        driverPendingTimeoutTimer.restart();
                         displayMessages.append({
                             role: "assistant",
-                            content: msg,
+                            content: i18n("Waiting for desktop automation consent…"),
                             shared: false,
                             timestamp: root.currentTimestamp()
                         });
-                    } else {
-                        console.log("[PlasmaLLM] " + msg);
                     }
                     if (systemPromptReady) {
                         var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, {
@@ -4193,9 +4198,25 @@ PlasmoidItem {
                 root.isDriverServiceActive = active;
                 if (!active) {
                     root.isDrivingActive = false;
+                    root.isDrivingPending = false;
+                    driverPendingTimeoutTimer.stop();
                 } else {
-                    if (root.sessionAutoMode && !root.isDrivingActive) {
+                    if (root.sessionAutoMode && !root.isDrivingActive && !root.isDrivingPending) {
                         root.ensureDriverSessionActive();
+                    } else if (root.isDrivingPending) {
+                        DriverManager.checkDriverSession(function(alive) {
+                            if (alive) {
+                                driverPendingTimeoutTimer.stop();
+                                root.isDrivingPending = false;
+                                root.isDrivingActive = true;
+                                displayMessages.append({
+                                    role: "assistant",
+                                    content: i18n("Drive session authorized successfully. Auto mode enabled."),
+                                    shared: false,
+                                    timestamp: root.currentTimestamp()
+                                });
+                            }
+                        }, true);
                     } else if (root.isDrivingActive) {
                         DriverManager.checkDriverSession(function(alive) {
                             root.isDrivingActive = alive;
@@ -4203,6 +4224,24 @@ PlasmoidItem {
                     }
                 }
             });
+        }
+    }
+
+    Timer {
+        id: driverPendingTimeoutTimer
+        interval: 75000
+        repeat: false
+        onTriggered: {
+            if (root.isDrivingPending) {
+                root.isDrivingPending = false;
+                root.isDrivingActive = false;
+                displayMessages.append({
+                    role: "error",
+                    content: i18n("Desktop automation consent timed out."),
+                    shared: false,
+                    timestamp: root.currentTimestamp()
+                });
+            }
         }
     }
 

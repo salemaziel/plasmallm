@@ -242,6 +242,59 @@ function collectTags(memories) {
     return out;
 }
 
+// --- Origin ---------------------------------------------------------------
+//
+// Who put a fact in the store. main.qml's tool bridge passes "assistant";
+// configMemory.qml's Add field passes "user". Records written before the
+// field was surfaced carry "", and so does anything imported — those read as
+// "unknown" rather than being attributed to either side, because guessing
+// wrong about provenance is worse than admitting the record does not say.
+//
+// This is a VIEW over the one store, not a second store, and origin
+// deliberately does not affect tiering: a pinned fact is pinned whoever wrote
+// it, and buildPromptSection never consults source. Routing the prompt by
+// origin would give the same sentence two different lifetimes depending on
+// who typed it, which is exactly the confusion two parallel stores caused.
+
+var SOURCE_USER = "user";
+var SOURCE_ASSISTANT = "assistant";
+var SOURCE_UNKNOWN = "unknown";
+
+/** Normalized origin of one entry: "user", "assistant", or "unknown". */
+function memorySource(memory) {
+    if (!memory) return SOURCE_UNKNOWN;
+    var s = _trim(memory.source).toLowerCase();
+    if (s === SOURCE_USER) return SOURCE_USER;
+    if (s === SOURCE_ASSISTANT) return SOURCE_ASSISTANT;
+    return SOURCE_UNKNOWN;
+}
+
+/** Entries with the given normalized origin; unrecognized origin yields []. */
+function memoriesBySource(memories, source) {
+    var out = [];
+    if (!memories) return out;
+    for (var i = 0; i < memories.length; i++) {
+        if (memorySource(memories[i]) === source) out.push(memories[i]);
+    }
+    return out;
+}
+
+/**
+ * { user, assistant, unknown } counts. Always reports all three keys so a
+ * caller can render "0 saved by you" without special-casing an absent field.
+ */
+function countBySource(memories) {
+    var out = {};
+    out[SOURCE_USER] = 0;
+    out[SOURCE_ASSISTANT] = 0;
+    out[SOURCE_UNKNOWN] = 0;
+    if (!memories) return out;
+    for (var i = 0; i < memories.length; i++) {
+        out[memorySource(memories[i])] += 1;
+    }
+    return out;
+}
+
 /**
  * Add a memory. Returns { memories, added, id, pinned, reason, evicted }.
  *

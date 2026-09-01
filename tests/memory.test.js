@@ -8,6 +8,8 @@ new Function('module', 'console', src +
   '\nmodule.exports={parseJsonl,serializeJsonl,addMemory,updateMemory,removeMemory,resolveTarget,setPinned,' +
   'searchMemories,markUsed,formatSearchResults,formatCandidates,buildPromptSection,pinnedMemories,' +
   'archivedMemories,countPinned,pinnedChars,hasPinRoom,collectTags,makeId,' +
+  'memorySource,memoriesBySource,countBySource,' +
+  'SOURCE_USER,SOURCE_ASSISTANT,SOURCE_UNKNOWN,' +
   'MAX_MEMORIES,MAX_PINNED,MAX_TEXT,RECALL_LIMIT,PINNED_CHAR_BUDGET};'
 )(mod, console);
 const M = mod.exports;
@@ -418,6 +420,58 @@ console.log('\nids are unique');
     seen[id] = true;
   }
   eq('5000 generated ids, no collisions', collisions, 0);
+}
+
+console.log('\norigin — a view over the one store, never a second store');
+{
+  eq('the Add field\'s value reads back as user',
+     M.memorySource({ source: 'user' }), M.SOURCE_USER);
+  eq('the tool bridge\'s value reads back as assistant',
+     M.memorySource({ source: 'assistant' }), M.SOURCE_ASSISTANT);
+  eq('case and padding do not change the answer',
+     M.memorySource({ source: '  Assistant ' }), M.SOURCE_ASSISTANT);
+  // Provenance is a claim about who wrote a fact. Anything the record does
+  // not actually say must read as unknown rather than defaulting to a side.
+  eq('a pre-field record is unattributed, not attributed to either side',
+     M.memorySource({ text: 'x' }), M.SOURCE_UNKNOWN);
+  eq('an empty source is unattributed', M.memorySource({ source: '' }), M.SOURCE_UNKNOWN);
+  eq('an unrecognized source is unattributed',
+     M.memorySource({ source: 'imported' }), M.SOURCE_UNKNOWN);
+  eq('a missing record is unattributed', M.memorySource(undefined), M.SOURCE_UNKNOWN);
+
+  const mixed = [
+    { id: 'm_1', text: 'mine', source: 'user', pinned: true },
+    { id: 'm_2', text: 'theirs', source: 'assistant', pinned: true },
+    { id: 'm_3', text: 'also theirs', source: 'assistant' },
+    { id: 'm_4', text: 'old', source: '' }
+  ];
+  eq('filtering by origin keeps only that origin',
+     M.memoriesBySource(mixed, M.SOURCE_ASSISTANT).map(m => m.id), ['m_2', 'm_3']);
+  eq('unattributed entries are reachable, not stranded',
+     M.memoriesBySource(mixed, M.SOURCE_UNKNOWN).map(m => m.id), ['m_4']);
+  eq('an unrecognized filter matches nothing rather than everything',
+     M.memoriesBySource(mixed, 'nobody'), []);
+  eq('counts cover the whole store',
+     M.countBySource(mixed), { user: 1, assistant: 2, unknown: 1 });
+  eq('all three keys are present on an empty store, so callers need no guard',
+     M.countBySource([]), { user: 0, assistant: 0, unknown: 0 });
+  eq('a null store still reports all three keys',
+     M.countBySource(null), { user: 0, assistant: 0, unknown: 0 });
+
+  // The whole point of keeping ONE store: origin must not leak into tiering
+  // or into the prompt, or the same sentence gets two lifetimes depending on
+  // who typed it — which is the confusion two parallel stores caused.
+  eq('origin does not decide the tier',
+     M.pinnedMemories(mixed).map(m => m.id), ['m_1', 'm_2']);
+  const sec = M.buildPromptSection(mixed, null, { recallAvailable: true });
+  // Assert against the ENTRY lines, not the whole section: the archive
+  // boilerplate says "whenever the user refers to…", so scanning the prose
+  // would fail for a reason that has nothing to do with provenance.
+  const entryLines = sec.split('\n').filter(l => l.indexOf('- [') === 0);
+  eq('a pinned entry renders id and text only, with no byline',
+     entryLines, ['- [m_1] mine', '- [m_2] theirs']);
+  eq('and both origins reach the prompt when pinned',
+     sec.indexOf('mine') !== -1 && sec.indexOf('theirs') !== -1, true);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

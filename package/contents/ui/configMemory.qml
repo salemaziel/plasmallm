@@ -25,14 +25,34 @@ BaseConfigPage {
     property bool loaded: false
     property string statusText: ""
     property string filterText: ""
+    // "" shows every origin; otherwise one of MemoryStore.SOURCE_*.
+    property string sourceFilter: ""
 
     readonly property int pinnedCount: MemoryStore.countPinned(memoryPage.memories)
     readonly property int archivedCount: memoryPage.memories.length - memoryPage.pinnedCount
     readonly property int pinnedChars: MemoryStore.pinnedChars(memoryPage.memories)
+    readonly property var sourceCounts: MemoryStore.countBySource(memoryPage.memories)
+    // True once at least two origins are represented — the only case where
+    // splitting the list by origin tells the user anything.
+    readonly property bool mixedOrigins: {
+        var counts = memoryPage.sourceCounts;
+        var seen = 0;
+        if (counts[MemoryStore.SOURCE_USER] > 0) seen++;
+        if (counts[MemoryStore.SOURCE_ASSISTANT] > 0) seen++;
+        if (counts[MemoryStore.SOURCE_UNKNOWN] > 0) seen++;
+        return seen > 1;
+    }
 
     readonly property string memoryPath: "${XDG_DATA_HOME:-$HOME/.local/share}/plasmallm/memories.jsonl"
 
-    // Pinned first, then newest last-written first, then the filter applied.
+    // Origin is a filter over the one store, never a second store: it does not
+    // affect which tier a fact is in or what reaches the prompt. Values run in
+    // the same order as originChoices.model below.
+    readonly property var originValues: ["", MemoryStore.SOURCE_USER,
+                                         MemoryStore.SOURCE_ASSISTANT,
+                                         MemoryStore.SOURCE_UNKNOWN]
+
+    // Pinned first, then newest last-written first, then the filters applied.
     // Sorting here rather than in the store keeps the file in insertion order,
     // which is what makes eviction predictable.
     function visibleMemories() {
@@ -40,6 +60,8 @@ BaseConfigPage {
         var list = [];
         for (var i = 0; i < memoryPage.memories.length; i++) {
             var m = memoryPage.memories[i];
+            if (memoryPage.sourceFilter.length > 0
+                && MemoryStore.memorySource(m) !== memoryPage.sourceFilter) continue;
             if (needle.length > 0) {
                 var hay = (m.text + " " + (m.tags || []).join(" ")).toLowerCase();
                 if (hay.indexOf(needle) === -1) continue;
@@ -53,6 +75,16 @@ BaseConfigPage {
             return (b.created || "") < (a.created || "") ? -1 : 1;
         });
         return list;
+    }
+
+    // "" for an entry whose record does not say. Better a missing byline than
+    // a wrong one — an unattributed record is usually just older than the
+    // field, not something the assistant wrote.
+    function originLabel(memory) {
+        var s = MemoryStore.memorySource(memory);
+        if (s === MemoryStore.SOURCE_USER) return i18n("added by you");
+        if (s === MemoryStore.SOURCE_ASSISTANT) return i18n("saved by the assistant");
+        return "";
     }
 
     P5Support.DataSource {
@@ -183,12 +215,37 @@ BaseConfigPage {
                   : i18n("Loading…")
         }
 
+        QQC2.Label {
+            Kirigami.FormData.label: i18n("Origin:")
+            // Only worth the row once the store actually holds more than one
+            // origin; a single-origin store makes this a line of noise.
+            visible: memoryPage.loaded && memoryPage.mixedOrigins
+            text: i18n("%1 added by you · %2 saved by the assistant · %3 unattributed",
+                       memoryPage.sourceCounts[MemoryStore.SOURCE_USER],
+                       memoryPage.sourceCounts[MemoryStore.SOURCE_ASSISTANT],
+                       memoryPage.sourceCounts[MemoryStore.SOURCE_UNKNOWN])
+            wrapMode: Text.Wrap
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            opacity: 0.7
+        }
+
         QQC2.TextField {
             Kirigami.FormData.label: i18n("Filter:")
             Layout.preferredWidth: Kirigami.Units.gridUnit * 20
             visible: memoryPage.memories.length > 8
             placeholderText: i18n("Search saved memories…")
             onTextChanged: memoryPage.filterText = text
+        }
+
+        QQC2.ComboBox {
+            id: originChoices
+            Kirigami.FormData.label: i18n("Show:")
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 20
+            visible: memoryPage.mixedOrigins
+            model: [i18n("Everything"), i18n("Added by me"),
+                    i18n("Saved by the assistant"), i18n("Unattributed")]
+            currentIndex: 0
+            onActivated: memoryPage.sourceFilter = memoryPage.originValues[currentIndex]
         }
 
         QQC2.ScrollView {
@@ -248,6 +305,9 @@ BaseConfigPage {
                                 Layout.fillWidth: true
                                 text: {
                                     var bits = [modelData.id];
+                                    var origin = memoryPage.originLabel(modelData);
+                                    if (origin.length > 0)
+                                        bits.push(origin);
                                     if (modelData.created)
                                         bits.push(i18n("saved %1", modelData.created.split("T")[0]));
                                     if (modelData.tags && modelData.tags.length > 0)

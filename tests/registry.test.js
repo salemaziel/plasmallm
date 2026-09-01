@@ -113,5 +113,50 @@ console.log('\nremember — replaces routes to update, not a second add');
   eq('without replaces it still adds', called, 'add');
 }
 
+console.log('\nthe gating config actually reaches the gate');
+// The gating tests above hand-build { memoryEnabled: true } and pass. They
+// prove the GATE works and say nothing about whether the real caller supplies
+// the key — and it did not: main.qml's getToolsConfig() carried upstream's
+// toolsEditMemory*/memoryPhrases through the merge but never the fork's own
+// memoryEnabled/memoryAutoRun. config.memoryEnabled read as undefined, so
+// remember/forget/recall silently never registered, the model could never
+// write a fact, and the store stayed empty while Settings still said memory
+// was on. A hand-built fixture cannot catch that; comparing the two sets can.
+{
+  const fs = require('fs');
+  const { UI } = require('./paths');
+
+  function objectKeys(src, fnName) {
+    const start = src.indexOf('function ' + fnName + '(');
+    const body = src.slice(start, src.indexOf('\n    }\n', start));
+    const out = new Set();
+    const re = /^\s+([A-Za-z_][A-Za-z0-9_]*)\s*:/gm;
+    let m;
+    while ((m = re.exec(body)) !== null) out.add(m[1]);
+    return out;
+  }
+  function configReads(src, fnName) {
+    const start = src.indexOf('function ' + fnName + '(');
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    const out = new Set();
+    const re = /config\.([A-Za-z_][A-Za-z0-9_]*)/g;
+    let m;
+    while ((m = re.exec(body)) !== null) out.add(m[1]);
+    return out;
+  }
+
+  const supplied = objectKeys(fs.readFileSync(UI + '/main.qml', 'utf8'), 'getToolsConfig');
+  const tmSrc = fs.readFileSync(UI + '/toolManager.js', 'utf8');
+  const read = new Set([
+    ...configReads(tmSrc, 'getEnabledTools'),
+    ...configReads(tmSrc, 'isAutoRun')
+  ]);
+
+  eq('getToolsConfig was located and is non-trivial', supplied.size > 20, true);
+  eq('the gating functions were located', read.size > 5, true);
+  eq('every config key the gating functions read is supplied by getToolsConfig',
+     [...read].filter(k => !supplied.has(k)).sort(), []);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -1629,6 +1629,15 @@ PlasmoidItem {
             localizeSystemPrompt: Plasmoid.configuration.localizeSystemPrompt,
             customTools: Plasmoid.configuration.customTools,
             compactionEnabled: Plasmoid.configuration.compactionEnabled,
+            // Both halves of memory are gated from this snapshot, not from
+            // Plasmoid.configuration: getEnabledTools reads memoryEnabled to
+            // hand over remember/forget/recall, and isAutoRun reads
+            // memoryAutoRun. Omitting them reads as undefined, which is
+            // falsy — the tools silently never register, so the model cannot
+            // write a memory and the store stays empty forever while the
+            // settings page still says memory is on.
+            memoryEnabled: Plasmoid.configuration.memoryEnabled,
+            memoryAutoRun: Plasmoid.configuration.memoryAutoRun,
             skillsEnabled: Plasmoid.configuration.skillsEnabled,
             skillsDisabledList: Plasmoid.configuration.skillsDisabledList,
             skillsScriptsAutoRun: Plasmoid.configuration.skillsScriptsAutoRun,
@@ -2102,13 +2111,23 @@ PlasmoidItem {
         
         // Pure shell command to list top 10 chats with mtime and a basic preview from the first user message.
         // Format: filePath <TAB> mtime <TAB> previewText
+        //
+        // A literal tab, never $'\t'. The DataSource runs every command through
+        // /bin/sh, which is dash on Debian and Ubuntu, and dash has no ANSI-C
+        // quoting: it passes the three characters $ \ t to sort, which refuses
+        // a multi-character separator and writes nothing. The failure is
+        // invisible because sort is mid-pipeline — `head` still exits 0, so the
+        // widget sees a successful command with empty stdout and renders "No
+        // recent chats" next to a folder full of them. Keep every command in
+        // this file POSIX; bash is not guaranteed.
+        var TAB = "\t";
         var cmd = "mkdir -p \"" + chatsDir + "\" && " +
                   "for f in \"" + chatsDir + "/\"*.jsonl; do " +
                   "  [ -e \"$f\" ] || continue; " +
                   "  mtime=$(stat -c %Y \"$f\"); " +
                   "  preview=$(grep -m 1 '\"role\":\"user\"' \"$f\" | sed -E 's/.*\"content\":\"([^\"]*)\".*/\\1/' | head -c 100); " +
                   "  printf \"%s\\t%s\\t%s\\n\" \"$f\" \"$mtime\" \"$preview\"; " +
-                  "done | sort -t$'\\t' -k2,2rn | head -n 10";
+                  "done | sort -t'" + TAB + "' -k2,2rn | head -n 10";
         
         lastHistoryFetchSource = cmd;
         historyFetchCommands.push(cmd);

@@ -34,7 +34,12 @@ const escaped = text.replace(/'/g, "'\\''");
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmallm-test-'));
 const out = path.join(dir, 'memories.jsonl');
 const cmd = `mkdir -p "$(dirname ${out})" && printf '%s' '${escaped}' > "${out}"`;
-cp.execSync(cmd, { shell: '/bin/bash' });
+// /bin/sh, NOT bash. P5Support's executable DataSource runs every command
+// through /bin/sh, which is dash on Debian and Ubuntu. Testing under bash
+// makes this suite pass on syntax the widget will never successfully run —
+// that gap is exactly how `sort -t$'\t'` reached production in
+// fetchHistoryList() and silently emptied the history list.
+cp.execSync(cmd, { shell: '/bin/sh' });
 
 const back = M.parseJsonl(fs.readFileSync(out, 'utf8')).memories;
 let pass = 0, fail = 0;
@@ -47,6 +52,69 @@ for (let i = 0; i < list.length; i++) {
          : (fail++, console.log('  FAIL ' + JSON.stringify(list[i].text) + '\n         got ' + JSON.stringify(got)));
 }
 fs.rmSync(dir, { recursive: true, force: true });
+
+// --- fetchHistoryList under the production shell --------------------------
+//
+// Pulls the real command expression out of main.qml and runs it under
+// /bin/sh against fixture files. `sort -t$'\t'` passed review, worked in every
+// bash the author tried, and returned NOTHING under dash — and because sort
+// sits mid-pipeline, `head` still exited 0, so the widget saw a successful
+// command with empty stdout and rendered "No recent chats" beside a folder
+// full of them. A test that only ran bash could never have caught it.
+{
+    const { UI } = require('./paths');
+    const eq = (label, got, want) => {
+        JSON.stringify(got) === JSON.stringify(want)
+            ? (pass++, console.log('  ok   ' + label))
+            : (fail++, console.log(`  FAIL ${label}\n         got  ${JSON.stringify(got)}\n         want ${JSON.stringify(want)}`));
+    };
+
+    const qml = fs.readFileSync(path.join(UI, 'main.qml'), 'utf8');
+    const start = qml.indexOf('function fetchHistoryList()');
+    const body = qml.slice(start, qml.indexOf('\n    }\n', start));
+    const m = body.match(/var cmd = ([\s\S]*?);\n/);
+    eq('the fetchHistoryList command expression was located', !!m, true);
+
+    if (m) {
+        // The expression is pure concatenation over chatsDir and TAB.
+        const build = new Function('chatsDir', 'TAB', 'return ' + m[1] + ';');
+        const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'plasmallm-hist-'));
+        const chats = path.join(fixture, 'plasmallm', 'chats');
+        fs.mkdirSync(chats, { recursive: true });
+        const files = ['2026-01-01_09-00.jsonl', '2026-01-02_09-00.jsonl', '2026-01-03_09-00.jsonl'];
+        files.forEach((f, i) => {
+            fs.writeFileSync(path.join(chats, f),
+                '{"_type":"meta","model":"m"}\n{"role":"user","content":"question ' + i + '"}\n');
+            // Distinct mtimes, oldest first, so newest-first ordering is provable.
+            const when = new Date(Date.now() - (files.length - i) * 60000);
+            fs.utimesSync(path.join(chats, f), when, when);
+        });
+
+        const cmd = build(chats, '\t');
+        eq('no ANSI-C quoting survives into the command', cmd.indexOf("$'"), -1);
+
+        // A broken command here yields no rows rather than a non-zero exit —
+        // that is the whole failure mode — so every assertion below must
+        // survive an empty result and report it, not throw.
+        let out = '';
+        try {
+            out = cp.execSync(cmd, { shell: '/bin/sh', encoding: 'utf8' });
+        } catch (e) {
+            out = (e && e.stdout) ? String(e.stdout) : '';
+        }
+        const rows = out.split('\n').filter(l => l.trim().length > 0);
+        eq('every chat file is listed', rows.length, files.length);
+        eq('newest first', rows.map(r => path.basename(r.split('\t')[0])),
+           files.slice().reverse());
+        // rows.length is part of the claim: [].every() is vacuously true, so
+        // without it this assertion passes loudest exactly when nothing works.
+        eq('each row is filePath TAB mtime TAB preview',
+           rows.length > 0 && rows.every(r => r.split('\t').length === 3), true);
+        eq('the preview carries the first user message',
+           rows.length > 0 ? rows[0].split('\t')[2] : '<no rows>', 'question 2');
+        fs.rmSync(fixture, { recursive: true, force: true });
+    }
+}
 
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

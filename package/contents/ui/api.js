@@ -13,6 +13,7 @@
 .import "memoryStore.js" as MemoryStore
 .import "walletCore.js" as WalletCore
 .import "skills.js" as Skills
+.import "reasoningSplit.js" as ReasoningSplit
 
 function localISODateTime() {
     var d = new Date();
@@ -385,8 +386,12 @@ function buildContentArray(apiType, text, attachments, usesResponsesAPI, extra) 
     return ad.buildContentArray(text, attachments);
 }
 
+// Single dispatch point for every adapter, and the only seam that also covers
+// OpenCode's format-retry — its inner adapters are handed a copy of these same
+// callbacks, so wrapping here catches a retried attempt too. See
+// reasoningSplit.js for why models that inline <think> need this at all.
 function sendStreaming(apiType, opts) {
-    return Adapters.getAdapter(apiType).sendStreaming(opts);
+    return Adapters.getAdapter(apiType).sendStreaming(ReasoningSplit.wrapStreamOpts(opts));
 }
 
 // GREEK LETTERS AND MATH SYMBOLS FOR LATEX CHARACTER REPLACEMENT

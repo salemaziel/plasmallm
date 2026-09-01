@@ -5,9 +5,10 @@ const path = UI + '/memoryStore.js';
 const src = fs.readFileSync(path, 'utf8').replace(/^\s*\.pragma library\s*$/m, '');
 const mod = {};
 new Function('module', 'console', src +
-  '\nmodule.exports={parseJsonl,serializeJsonl,addMemory,removeMemory,setPinned,searchMemories,markUsed,' +
-  'formatSearchResults,buildPromptSection,pinnedMemories,archivedMemories,countPinned,collectTags,makeId,' +
-  'MAX_MEMORIES,MAX_PINNED,MAX_TEXT,RECALL_LIMIT};'
+  '\nmodule.exports={parseJsonl,serializeJsonl,addMemory,updateMemory,removeMemory,resolveTarget,setPinned,' +
+  'searchMemories,markUsed,formatSearchResults,formatCandidates,buildPromptSection,pinnedMemories,' +
+  'archivedMemories,countPinned,pinnedChars,hasPinRoom,collectTags,makeId,' +
+  'MAX_MEMORIES,MAX_PINNED,MAX_TEXT,RECALL_LIMIT,PINNED_CHAR_BUDGET};'
 )(mod, console);
 const M = mod.exports;
 
@@ -141,7 +142,10 @@ console.log('\nMAX_MEMORIES eviction never touches pinned entries');
   for (let i = 0; i < M.MAX_MEMORIES + 5; i++) list = M.addMemory(list, 'archived ' + i, NOW).memories;
   eq('capped at MAX_MEMORIES', list.length, M.MAX_MEMORIES);
   eq('every pinned entry survived', M.countPinned(list), M.MAX_PINNED);
-  eq('oldest archived evicted first', M.archivedMemories(list)[0].text, 'archived 25');
+  // Everything over MAX_MEMORIES is evicted from the front of the archive, and
+  // the pinned entries count toward the total — so the first survivor is
+  // however many pinned entries there were, plus the 5 overflow.
+  eq('oldest archived evicted first', M.archivedMemories(list)[0].text, 'archived ' + (M.MAX_PINNED + 5));
   eq('newest kept', list[list.length - 1].text, 'archived ' + (M.MAX_MEMORIES + 4));
 }
 
@@ -164,6 +168,92 @@ console.log('\nremoveMemory');
     const l = [{ id: 'm_1', text: 'contains m_2 inside' }, { id: 'm_2', text: 'other' }];
     return M.removeMemory(l, 'm_2').text;
   })(), 'other');
+}
+
+console.log('\nremoveMemory — an ambiguous phrase must not delete an arbitrary entry');
+{
+  const list = seed([
+    'the printer is a Brother HL-L2350DW',
+    'the printer lives in the back room',
+    'the printer needs a driver from the AUR'
+  ]);
+  const r = M.removeMemory(list, 'the printer');
+  eq('refuses rather than guessing', r.removed, false);
+  eq('and says why', r.reason, 'ambiguous');
+  eq('nothing was deleted', r.memories.length, 3);
+  eq('every candidate is named', r.matches.length, 3);
+  eq('candidates render with ids the model can reuse',
+     M.formatCandidates(r.matches).split('\n')[0], '- [' + list[0].id + '] ' + list[0].text);
+
+  // A longer phrase that narrows to one is still allowed through.
+  const one = M.removeMemory(list, 'printer lives');
+  eq('a uniquely-matching phrase still works', one.removed, true);
+  eq('and takes the right entry', one.text, 'the printer lives in the back room');
+
+  // An exact-text match is unambiguous even though it is also a substring of
+  // nothing else; resolution order puts exact text ahead of substring search.
+  const exact = M.removeMemory(list, 'the printer needs a driver from the AUR');
+  eq('exact text resolves without ambiguity', exact.removed, true);
+}
+
+console.log('\nupdateMemory — corrections keep the entry, not just the wording');
+{
+  let list = seed(['Sam works at Via Del Web']);
+  list = M.markUsed(list, [list[0].id], NOW).memories;
+  const before = list[0];
+  const r = M.updateMemory(list, before.id, 'Sam runs Via Del Web');
+  eq('updated', r.updated, true);
+  eq('reports the old wording', r.oldText, 'Sam works at Via Del Web');
+  eq('id survives', r.memories[0].id, before.id);
+  eq('created stamp survives', r.memories[0].created, before.created);
+  eq('pinned state survives', r.memories[0].pinned, before.pinned);
+  eq('use history survives', r.memories[0].useCount, 1);
+  eq('input array is never mutated', list[0].text, 'Sam works at Via Del Web');
+
+  eq('same wording is a no-op', M.updateMemory(r.memories, before.id, 'Sam runs Via Del Web').reason, 'unchanged');
+  eq('empty text refused', M.updateMemory(r.memories, before.id, '   ').reason, 'empty');
+  eq('unknown target reported', M.updateMemory(r.memories, 'nothing like this', 'x').reason, 'not_found');
+
+  const two = seed(['likes tea', 'likes coffee']);
+  eq('rewording onto an existing entry is a duplicate',
+     M.updateMemory(two, two[0].id, 'likes coffee').reason, 'duplicate');
+  eq('and nothing changed', M.updateMemory(two, two[0].id, 'likes coffee').memories[0].text, 'likes tea');
+
+  const amb = seed(['the printer is loud', 'the printer is old']);
+  eq('an ambiguous target is refused', M.updateMemory(amb, 'the printer', 'x').reason, 'ambiguous');
+}
+
+console.log('\npinned budget is measured in characters, not entries');
+{
+  eq('an empty store has no pinned characters', M.pinnedChars([]), 0);
+
+  // Short facts: many more than the old count cap of 20 stay in the prompt,
+  // because what they actually cost is well under the budget.
+  let shortList = [];
+  for (let i = 0; i < 60; i++) shortList = M.addMemory(shortList, 'short fact ' + i, NOW).memories;
+  eq('60 short facts all pin', M.countPinned(shortList), 60);
+  eq('and cost well under budget', M.pinnedChars(shortList) < M.PINNED_CHAR_BUDGET, true);
+
+  // Long facts: the budget binds early, so the prompt cost stays bounded.
+  const LONG = 'x'.repeat(M.MAX_TEXT);
+  let longList = [];
+  for (let i = 0; i < 40; i++) longList = M.addMemory(longList, LONG.slice(0, -3) + i, NOW).memories;
+  eq('long facts stop pinning well before the count ceiling',
+     M.countPinned(longList) < M.MAX_PINNED, true);
+  eq('pinned cost never exceeds the budget',
+     M.pinnedChars(longList) <= M.PINNED_CHAR_BUDGET, true);
+  eq('the overflow is archived, not dropped', longList.length, 40);
+
+  // Over-budget pinning is still refused rather than evicting a pin.
+  const over = M.addMemory(longList, LONG, NOW, 'test', { pinned: true });
+  eq('an explicit pin over budget is refused', over.reason, 'pin_budget');
+  eq('but the fact is still saved', over.added, true);
+  eq('to the archive', over.pinned, false);
+
+  eq('hasPinRoom discounts the entry being re-pinned', (() => {
+    const l = [{ id: 'm_1', text: 'y'.repeat(M.PINNED_CHAR_BUDGET), pinned: true }];
+    return M.hasPinRoom(l, M.PINNED_CHAR_BUDGET, 'm_1');
+  })(), true);
 }
 
 console.log('\nsearchMemories');

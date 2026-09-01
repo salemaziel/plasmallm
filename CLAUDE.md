@@ -51,7 +51,11 @@ The neutral internal format is the OpenAI shape; non-OpenAI adapters translate o
 
 Streaming is hand-rolled: raw `XMLHttpRequest`, incremental SSE buffer parsing at `readyState === 3`. There is no SDK. Adding a provider means writing the wire format and the SSE parser yourself.
 
-`opencode.js` is the exception to "one adapter, one wire format": OpenCode Go is a gateway whose models are split across OpenAI `/chat/completions` and Anthropic `/messages`, so it delegates to `openai_chat.js` or `anthropic.js` per model, converting tool schemas and image content parts to match. Routing comes from `MODEL_PREFIX_FORMATS` (the Qwen family is `/messages`-only), falls back once on an endpoint-level rejection, and caches what worked for the session.
+`opencode.js` is the exception to "one adapter, one wire format": OpenCode Zen and Go are gateways whose models are split across chat completions, Responses, Anthropic `/messages` and Gemini `generateContent`, so it delegates per model to `openai_chat.js`, `openai_responses.js`, `anthropic.js` or `gemini.js`. It sets `opts.opencodeAuth`, and those adapters rewrite their own URLs and headers for the gateway (see `anthropic.js`'s `/v1` guard and `gemini.js`'s Zen path).
+
+Protocol selection lives in `opencodeRoute.js` — pure, no QML or network, so `tests/opencode_route.mjs` can drive it directly. Those rules come from published endpoint tables and go stale, so a request retries the remaining formats on an endpoint-level rejection and remembers what worked for the session.
+
+**The retry is bounded to routes that defaulted to `"chat"`.** `buildTools`/`buildContentArray` emit the *target protocol's* shape at compose time, so a payload built for one protocol cannot be re-sent as another; `"chat"` is both `resolveProtocol`'s low-confidence default and the only shape with converters (`convertMessagesForAnthropic`, `convertMessagesForResponses`). A prefix-matched route is deliberate and must not retry. `looksLikeWrongEndpoint` exists because OpenCode signals a format mismatch as **HTTP 401** with a `ModelError` body — reading that as an auth failure would tell the user to regenerate a working key.
 
 ### Tool-call normalization
 
@@ -104,14 +108,16 @@ Compaction is lossy in the prompt but not in storage: the summary is required to
 
 ### Long-term memory
 
-Facts that outlive a conversation, in JSONL at `$XDG_DATA_HOME/plasmallm/memories.jsonl`. `memoryStore.js` is a `.pragma library` holding every decision (parse, dedupe, tiering, ranking, prompt formatting); `main.qml` owns the file I/O and reaches the tools through a `context.memory` bridge (`add` / `remove` / `search` / `list`).
+Facts that outlive a conversation, in JSONL at `$XDG_DATA_HOME/plasmallm/memories.jsonl`. `memoryStore.js` is a `.pragma library` holding every decision (parse, dedupe, tiering, ranking, prompt formatting); `main.qml` owns the file I/O and reaches the tools through a `context.memory` bridge (`add` / `update` / `remove` / `search` / `list`).
 
 Two tiers, because always-injecting every memory does not scale:
 
-- **pinned** (`MAX_PINNED`, 20) — written into the system prompt every request. New memories pin themselves while there is room, so a small store behaves exactly like a flat always-injected list.
+- **pinned** (`PINNED_CHAR_BUDGET`, 6000 characters) — written into the system prompt every request. New memories pin themselves while there is room, so a small store behaves exactly like a flat always-injected list.
 - **archived** — everything else. Never injected; found through the `recall` tool, which scores entries with TF-IDF (`searchMemories`). The prompt carries only a count and tag list.
 
-Two invariants worth keeping: a pin over budget is **refused and reported**, never granted by evicting another pin, and store-cap eviction only ever takes archived entries — a memory that silently stops being visible is worse than one that was never saved. `parseJsonl` reads a record with no `pinned` field as pinned, so upgrading from the pre-tier format cannot drop anything out of the prompt.
+**The pinned budget is characters, not entries.** What the tier costs is prompt space, and entries vary by more than an order of magnitude (`MAX_TEXT` is 500; a real memory is often ~60). A count cap sized for worst-case entries binds far too early on typical ones — it would archive facts, putting them behind a `recall` the model has to think to call, while most of the space it was protecting sat unused. `MAX_PINNED` survives only as a ceiling on pathological counts of tiny entries; characters normally bind first. Use `hasPinRoom()` rather than comparing counts.
+
+Three invariants worth keeping: a pin over budget is **refused and reported**, never granted by evicting another pin; store-cap eviction only ever takes archived entries — a memory that silently stops being visible is worse than one that was never saved; and a reference that matches more than one entry is **refused with the candidates listed**, never resolved to the first hit (`resolveTarget`). That last one matters most for `forget`: deleting is irreversible, and "the printer" can easily name three saved facts. `updateMemory` exists so a correction keeps the entry's id, created stamp, tags, pinned state and use count — forget-then-remember resets all of them. `parseJsonl` reads a record with no `pinned` field as pinned, so upgrading from the pre-tier format cannot drop anything out of the prompt.
 
 `Plasmoid.configuration.memoryEnabled` gates both halves (the three tools and the prompt section) the way `compactionEnabled` gates `restore_context`. `api.js` checks that `recall` actually survived tool gating before printing the archive index — never advertise a tool the model was not given. `configMemory.qml` edits the file in its own QML context and bumps `memoryRevision` to make the widget re-read it.
 

@@ -1724,6 +1724,16 @@ PlasmoidItem {
         return result;
     }
 
+    function updateMemory(target, text) {
+        var result = MemoryStore.updateMemory(root.memories, target, text);
+        if (result.updated) {
+            root.memories = result.memories;
+            persistMemories();
+            initSystemPrompt();
+        }
+        return result;
+    }
+
     function clearMemories() {
         root.memories = [];
         persistMemories();
@@ -3535,6 +3545,7 @@ PlasmoidItem {
             },
             memory: {
                 add: function(text, opts) { return root.addMemory(text, "assistant", opts); },
+                update: function(target, text) { return root.updateMemory(target, text); },
                 remove: function(target) { return root.removeMemory(target); },
                 search: function(query) { return root.searchMemories(query); },
                 list: function() { return root.memories.slice(); }

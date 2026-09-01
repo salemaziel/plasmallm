@@ -14,9 +14,8 @@
 //
 // Two tiers, because always-injecting every memory does not scale:
 //
-//   pinned   — a small set (MAX_PINNED) written into the system prompt on every
-//              request. Recall costs the model nothing, so identity-level facts
-//              belong here.
+//   pinned   — written into the system prompt on every request. Recall costs
+//              the model nothing, so identity-level facts belong here.
 //   archived — everything else. Never injected; found on demand through the
 //              `recall` tool, which scores entries against a query with TF-IDF
 //              (see searchMemories). The prompt carries only a one-line index
@@ -26,13 +25,23 @@
 // archive once the budget is full, so a small store behaves exactly like a
 // flat always-injected list and only large ones pay for retrieval. Pinning is
 // never automatic beyond that budget and never silently evicts: a pin that
-// would exceed MAX_PINNED is refused and reported, because a memory that
-// quietly stops being visible is worse than one that was never saved.
+// would exceed it is refused and reported, because a memory that quietly stops
+// being visible is worse than one that was never saved.
+//
+// The budget is measured in CHARACTERS, not entries. What the pinned tier
+// actually costs is prompt space, and entries vary by more than an order of
+// magnitude (MAX_TEXT is 500, but a real memory is often ~60). A count cap
+// sized for worst-case entries binds far too early on typical ones — it would
+// archive facts, and put them behind a recall the model has to think to call,
+// while most of the space it was protecting sat unused. MAX_PINNED remains as
+// a ceiling on pathological counts of tiny entries; characters normally bind
+// first.
 //
 // This file is a .pragma library: pure functions only, no QML objects and no
 // i18n(). main.qml owns the file I/O and passes strings in and out.
 
-var MAX_PINNED = 20;      // always-in-prompt budget; refused, never auto-evicted
+var PINNED_CHAR_BUDGET = 6000;  // always-in-prompt budget; refused, never auto-evicted
+var MAX_PINNED = 100;     // ceiling on pinned entry count; chars usually bind first
 var MAX_MEMORIES = 2000;  // total store cap; oldest archived entries evicted first
 var MAX_TEXT = 500;       // per-entry character cap
 var MAX_TAGS = 5;         // per-entry tag cap
@@ -186,6 +195,35 @@ function countPinned(memories) {
     return pinnedMemories(memories).length;
 }
 
+/** Characters currently held by the pinned tier — what it costs in the prompt. */
+function pinnedChars(memories) {
+    var pinned = pinnedMemories(memories);
+    var total = 0;
+    for (var i = 0; i < pinned.length; i++) {
+        total += _trim(pinned[i].text).length;
+    }
+    return total;
+}
+
+/**
+ * Is there room to pin `textLength` more characters? Characters normally bind;
+ * the count ceiling only catches a pathological number of tiny entries.
+ * `excludeId` discounts an entry already in the pinned set, so re-pinning or
+ * rewording it is measured against the set without its old self.
+ */
+function hasPinRoom(memories, textLength, excludeId) {
+    var list = memories || [];
+    var used = 0;
+    var count = 0;
+    for (var i = 0; i < list.length; i++) {
+        if (list[i].pinned !== true) continue;
+        if (excludeId && list[i].id === excludeId) continue;
+        used += _trim(list[i].text).length;
+        count++;
+    }
+    return (count < MAX_PINNED) && (used + (textLength || 0) <= PINNED_CHAR_BUDGET);
+}
+
 /** Sorted unique tags across archived entries, for the prompt's index line. */
 function collectTags(memories) {
     var seen = {};
@@ -234,7 +272,7 @@ function addMemory(memories, text, createdIso, source, opts) {
         }
     }
 
-    var room = countPinned(list) < MAX_PINNED;
+    var room = hasPinRoom(list, body.length);
     var wantPin = (opts.pinned === undefined || opts.pinned === null) ? room : (opts.pinned === true);
     var reason = "ok";
     if (wantPin && !room) {
@@ -291,7 +329,7 @@ function setPinned(memories, id, pinned) {
         if (list[i].pinned === (pinned === true)) {
             return { memories: list, changed: false, reason: "unchanged" };
         }
-        if (pinned === true && countPinned(list) >= MAX_PINNED) {
+        if (pinned === true && !hasPinRoom(list, _trim(list[i].text).length, list[i].id)) {
             return { memories: list, changed: false, reason: "pin_budget" };
         }
         var copy = {};
@@ -304,33 +342,119 @@ function setPinned(memories, id, pinned) {
 }
 
 /**
- * Remove by exact id, else by a case-insensitive substring of the text — the
- * model rarely has the id to hand and would otherwise be unable to forget
- * anything it did not just write.
+ * Resolve a reference to exactly one entry: an exact id, else exact text, else
+ * a substring that matches only one entry. Returns { idx, matches, reason }
+ * with reason "ok", "not_found", or "ambiguous"; `matches` carries the
+ * conflicting entries when ambiguous.
+ *
+ * The uniqueness requirement is the point. The model rarely has an id to hand,
+ * so it forgets by phrase — and a phrase like "the printer" can name three
+ * saved facts. Taking the first hit deletes an arbitrary one and reports
+ * success, which is the worst possible outcome for an irreversible operation
+ * on data the user asked to keep. Refuse and list the candidates instead; the
+ * model can then re-ask with an id or a longer phrase.
  */
-function removeMemory(memories, idOrText) {
-    var list = memories ? memories.slice() : [];
+function resolveTarget(memories, idOrText) {
+    var list = memories || [];
     var needle = _trim(idOrText);
-    if (needle.length === 0) return { memories: list, removed: false, text: "" };
+    if (needle.length === 0) return { idx: -1, matches: [], reason: "not_found" };
 
-    for (var i = 0; i < list.length; i++) {
-        if (list[i].id === needle) {
-            var byId = list[i].text;
-            list.splice(i, 1);
-            return { memories: list, removed: true, text: byId };
-        }
+    var i;
+    for (i = 0; i < list.length; i++) {
+        if (list[i].id === needle) return { idx: i, matches: [list[i]], reason: "ok" };
+    }
+
+    var key = _fingerprint(needle);
+    for (i = 0; i < list.length; i++) {
+        if (_fingerprint(list[i].text) === key) return { idx: i, matches: [list[i]], reason: "ok" };
     }
 
     var lower = needle.toLowerCase();
-    for (var j = 0; j < list.length; j++) {
-        if (list[j].text.toLowerCase().indexOf(lower) !== -1) {
-            var byText = list[j].text;
-            list.splice(j, 1);
-            return { memories: list, removed: true, text: byText };
-        }
+    var hits = [];
+    for (i = 0; i < list.length; i++) {
+        if (list[i].text.toLowerCase().indexOf(lower) !== -1) hits.push(i);
+    }
+    if (hits.length === 1) return { idx: hits[0], matches: [list[hits[0]]], reason: "ok" };
+    if (hits.length > 1) {
+        var candidates = [];
+        for (i = 0; i < hits.length; i++) candidates.push(list[hits[i]]);
+        return { idx: -1, matches: candidates, reason: "ambiguous" };
+    }
+    return { idx: -1, matches: [], reason: "not_found" };
+}
+
+/**
+ * Remove the one entry `idOrText` resolves to.
+ * Returns { memories, removed, text, matches, reason } — reason "ok",
+ * "not_found", or "ambiguous". On ambiguity nothing is removed and `matches`
+ * holds the candidates.
+ */
+function removeMemory(memories, idOrText) {
+    var list = memories ? memories.slice() : [];
+    var res = resolveTarget(list, idOrText);
+    if (res.reason !== "ok") {
+        return { memories: list, removed: false, text: "", matches: res.matches, reason: res.reason };
+    }
+    var gone = list[res.idx].text;
+    list.splice(res.idx, 1);
+    return { memories: list, removed: true, text: gone, matches: [], reason: "ok" };
+}
+
+/**
+ * Replace the text of the one entry `idOrText` resolves to, keeping its id,
+ * created stamp, tags, pinned state and use history. Correcting a fact through
+ * remove-then-add would mint a new id and reset that provenance, and would
+ * silently drop the entry out of the prompt if the pinned tier had meanwhile
+ * filled.
+ *
+ * Returns { memories, updated, id, oldText, text, matches, reason } — reason
+ * "ok", "unchanged", "duplicate", "empty", "not_found", or "ambiguous". A
+ * reword that no longer fits the pinned budget is refused ("pin_budget")
+ * rather than quietly archived.
+ */
+function updateMemory(memories, idOrText, text) {
+    var list = memories ? memories.slice() : [];
+    var body = _trim(text);
+    if (body.length === 0) {
+        return { memories: list, updated: false, id: "", oldText: "", text: "", matches: [], reason: "empty" };
+    }
+    if (body.length > MAX_TEXT) body = body.substring(0, MAX_TEXT);
+
+    var res = resolveTarget(list, idOrText);
+    if (res.reason !== "ok") {
+        return { memories: list, updated: false, id: "", oldText: "", text: body, matches: res.matches, reason: res.reason };
     }
 
-    return { memories: list, removed: false, text: "" };
+    var target = list[res.idx];
+    var fp = _fingerprint(body);
+    if (_fingerprint(target.text) === fp) {
+        return { memories: list, updated: false, id: target.id, oldText: target.text, text: body, matches: [], reason: "unchanged" };
+    }
+    for (var i = 0; i < list.length; i++) {
+        if (i !== res.idx && _fingerprint(list[i].text) === fp) {
+            return { memories: list, updated: false, id: list[i].id, oldText: target.text, text: body, matches: [list[i]], reason: "duplicate" };
+        }
+    }
+    if (target.pinned === true && !hasPinRoom(list, body.length, target.id)) {
+        return { memories: list, updated: false, id: target.id, oldText: target.text, text: body, matches: [], reason: "pin_budget" };
+    }
+
+    var copy = {};
+    for (var k in target) copy[k] = target[k];
+    var old = target.text;
+    copy.text = body;
+    list[res.idx] = copy;
+    return { memories: list, updated: true, id: copy.id, oldText: old, text: body, matches: [], reason: "ok" };
+}
+
+/** Renders candidate entries for a disambiguation message. */
+function formatCandidates(matches) {
+    var lines = [];
+    if (!matches) return "";
+    for (var i = 0; i < matches.length; i++) {
+        lines.push("- [" + matches[i].id + "] " + matches[i].text);
+    }
+    return lines.join("\n");
 }
 
 /**

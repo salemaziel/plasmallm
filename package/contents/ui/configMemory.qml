@@ -28,6 +28,7 @@ BaseConfigPage {
 
     readonly property int pinnedCount: MemoryStore.countPinned(memoryPage.memories)
     readonly property int archivedCount: memoryPage.memories.length - memoryPage.pinnedCount
+    readonly property int pinnedChars: MemoryStore.pinnedChars(memoryPage.memories)
 
     readonly property string memoryPath: "${XDG_DATA_HOME:-$HOME/.local/share}/plasmallm/memories.jsonl"
 
@@ -172,9 +173,13 @@ BaseConfigPage {
 
         QQC2.Label {
             Kirigami.FormData.label: i18n("Stored:")
+            // The pinned budget is characters, not entries, so report how full
+            // it is rather than a count against a cap that does not exist.
             text: memoryPage.loaded
-                  ? i18n("%1 of %2 pinned · %3 archived",
-                         memoryPage.pinnedCount, MemoryStore.MAX_PINNED, memoryPage.archivedCount)
+                  ? i18n("%1 pinned, using %2% of the prompt budget · %3 archived",
+                         memoryPage.pinnedCount,
+                         Math.round(100 * memoryPage.pinnedChars / MemoryStore.PINNED_CHAR_BUDGET),
+                         memoryPage.archivedCount)
                   : i18n("Loading…")
         }
 
@@ -225,8 +230,8 @@ BaseConfigPage {
                                     // Put the box back; the model list is the truth.
                                     checked = modelData.pinned === true;
                                     if (result.reason === "pin_budget")
-                                        memoryPage.statusText = i18n("Only %1 memories can be pinned at once. Unpin one first.",
-                                                                     MemoryStore.MAX_PINNED);
+                                        memoryPage.statusText = i18n("The pinned set is full — it holds about %1 characters of prompt. Unpin something, or shorten this memory.",
+                                                                     MemoryStore.PINNED_CHAR_BUDGET);
                                 }
                             }
                         }

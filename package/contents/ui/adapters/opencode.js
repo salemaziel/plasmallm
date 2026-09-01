@@ -15,9 +15,9 @@
 //
 // Those tables go stale: OpenCode reshuffles which backend serves a model
 // without notice, and a wrong guess fails at the endpoint level rather than
-// degrading. So a request whose protocol was *defaulted* rather than matched
-// retries on the remaining formats and remembers what worked for the session.
-// See RETRY SCOPE below for why that is limited to defaulted routes.
+// degrading. So a request rejected at the endpoint level retries on the
+// remaining formats and remembers what worked for the session. See RETRY
+// SCOPE below for how that stays hub-and-spoke rather than N×M.
 
 .import "openai_chat.js" as Chat
 .import "openai_responses.js" as Responses
@@ -52,26 +52,37 @@ var publicModelList = true;
 
 // RETRY SCOPE.
 //
-// buildTools/buildContentArray run at compose time and emit the *target
-// protocol's* shape (anthropic.js wants {type:"image",source:{…}}, gemini.js
-// wants {inlineData:{…}}). A payload built for one protocol therefore cannot
-// simply be re-sent as another, and converting every pair would mean N×M
-// translators.
+// Every format is retryable, because the payload is always built in one
+// neutral shape and converted at send time.
 //
-// resolveProtocol returns "chat" as its default for anything it does not
-// recognise, which is exactly the low-confidence route most likely to be
-// wrong when OpenCode moves a backend. It is also the only shape with
-// converters below. So: retry only when the static route *defaulted* to
-// "chat". A model matched by an explicit prefix rule (claude-, gemini-,
-// gpt-, qwen3., …) is a deliberate, high-confidence route — it gets error
-// translation, not a retry that would post a mis-shaped body.
-var FALLBACK_ORDER = ["chat", "anthropic", "responses"];
+// The alternative — letting buildTools/buildContentArray emit the *target*
+// protocol's shape at compose time — is what would force an N×M problem: a
+// body already built as Anthropic blocks cannot be re-sent as Gemini parts
+// without a translator for every ordered pair. Building neutrally instead
+// makes this hub-and-spoke: one converter per protocol, three in total.
+//
+// Chat shape is the hub, and it is a lossless one — openai_chat.js's
+// buildContentArray keeps an attachment's data URL whole and inlines text
+// attachments as text parts, so it carries everything the other builders
+// carry. Everything past the content array is already neutral: anthropic.js,
+// gemini.js and openai_responses.js each expose translateMessages(neutral),
+// which handles roles, tool calls, tool results and thinking blocks from the
+// OpenAI shape. Only the tools array and the user content parts ever needed
+// converting, which is why the spoke count is small.
+//
+// The static route still picks the *first* attempt, so a high-confidence
+// prefix match costs no extra round trip. It just no longer dead-ends when
+// OpenCode moves that model to another backend.
+//
+// Discipline that is not about shape stays: retry only on an endpoint-level
+// rejection (looksLikeWrongEndpoint), never after partial output, and never
+// the same format twice.
+var FALLBACK_ORDER = ["chat", "anthropic", "responses", "gemini"];
 
-// Session-scoped learning, keyed by model. Only ever written for models whose
-// static route defaulted to "chat", so a learned value always describes a
-// payload that was built in chat shape and converted on the way out. Never
-// consulted by buildTools/buildContentArray — letting it change the built
-// shape mid-session would leave earlier history in the old one.
+// Session-scoped learning, keyed by model. Every payload is built in the same
+// neutral shape, so a learned value is valid for any route. Never consulted by
+// buildTools/buildContentArray — those must stay neutral, and letting a learned
+// value change the built shape would defeat the conversion path.
 var learnedFormats = {};
 
 function _shallowCopy(obj) {
@@ -129,34 +140,17 @@ function fetchModels(endpoint, apiKey, opts, callback) {
     return Chat.fetchModels(canonicalBase(endpoint, opts), apiKey, callback);
 }
 
+// Tools and content are always built in the neutral chat shape; sendStreaming
+// converts to whichever protocol it is actually attempting. See RETRY SCOPE —
+// building per-protocol here is what would make a retry impossible.
 function buildTools(options) {
-    var p = protocolFor(options);
-    var o = copyOpts(options);
-    if (p === "responses") {
-        o.usesResponsesAPI = true;
-        return Responses.buildTools(o);
-    }
-    if (p === "anthropic")
-        return Anthropic.buildTools(o);
-    if (p === "gemini")
-        return Gemini.buildTools(o);
-    return Chat.buildTools(o);
+    return Chat.buildTools(copyOpts(options));
 }
 
+// `extra` carries {model, endpoint, providerName} from api.js. It is no longer
+// consulted — the shape is neutral regardless of route — but the parameter
+// stays because api.js passes it positionally for this apiType.
 function buildContentArray(text, attachments, extra) {
-    var model = extra;
-    var product = "zen";
-    if (extra && typeof extra === "object") {
-        model = extra.model;
-        product = Route.productFromEndpoint(extra.endpoint, extra.providerName);
-    }
-    var p = Route.resolveProtocol(product, model);
-    if (p === "responses")
-        return Responses.buildContentArray(text, attachments);
-    if (p === "anthropic")
-        return Anthropic.buildContentArray(text, attachments);
-    if (p === "gemini")
-        return Gemini.buildContentArray(text, attachments);
     return Chat.buildContentArray(text, attachments);
 }
 
@@ -201,6 +195,27 @@ function toResponsesTools(tools) {
     return out;
 }
 
+// OpenAI chat {type,function:{name,description,parameters}} -> Gemini's single
+// functionDeclarations wrapper. Gemini takes one tool object holding every
+// declaration, not one object per function, so an empty set is [] rather than
+// a wrapper around nothing.
+function toGeminiTools(tools) {
+    var fns = [];
+    if (!tools) return fns;
+    for (var i = 0; i < tools.length; i++) {
+        var t = tools[i];
+        var fn = t && t["function"];
+        if (!fn || !fn.name) continue;
+        fns.push({
+            name: fn.name,
+            description: fn.description || "",
+            parameters: fn.parameters || { type: "object", properties: {} }
+        });
+    }
+    if (fns.length === 0) return [];
+    return [{ functionDeclarations: fns }];
+}
+
 // The Responses strategy's translateMessages passes an array content through
 // verbatim, because it is normally handed parts already built in Responses
 // shape. On the retry path they were built in chat shape, so convert:
@@ -224,20 +239,30 @@ function convertContentForResponses(content) {
     return out;
 }
 
-function convertMessagesForResponses(messages) {
+// The three converters differ only in how they map one content part, so the
+// message walk itself is shared. String content (the common case, and every
+// tool result) is passed through — each translateMessages already accepts it.
+// Thinking blocks ride along untouched: their signature fields are read by
+// name (`signature` for Anthropic, `thoughtSignature` for Gemini), so one
+// protocol's signatures are ignored rather than rejected by another.
+function mapMessageContent(messages, convertContent) {
     if (!messages) return messages;
     var out = [];
     for (var i = 0; i < messages.length; i++) {
         var m = messages[i];
         if (m && Array.isArray(m.content)) {
             var copy = _shallowCopy(m);
-            copy.content = convertContentForResponses(m.content);
+            copy.content = convertContent(m.content);
             out.push(copy);
         } else {
             out.push(m);
         }
     }
     return out;
+}
+
+function convertMessagesForResponses(messages) {
+    return mapMessageContent(messages, convertContentForResponses);
 }
 
 // Text blocks are identical across both APIs, but images are not: OpenAI
@@ -250,12 +275,16 @@ function convertContentForAnthropic(content) {
         var part = content[i];
         if (part && part.type === "image_url" && part.image_url && typeof part.image_url.url === "string") {
             var m = /^data:([^;]+);base64,(.*)$/.exec(part.image_url.url);
-            if (m) {
+            // Mirror anthropic.js's own isImageMime guard. /messages accepts an
+            // image block only for image/* — a PDF data URL sent as one is
+            // rejected outright. Gemini and Responses have no such restriction,
+            // which is why only this converter filters on mime.
+            if (m && m[1].indexOf("image/") === 0) {
                 out.push({ type: "image", source: { type: "base64", media_type: m[1], data: m[2] } });
                 continue;
             }
-            // A non-data URL cannot be inlined; drop it rather than send a block
-            // the Messages API will reject outright.
+            // A non-data URL cannot be inlined either; drop rather than send a
+            // block the Messages API will reject.
             continue;
         }
         out.push(part);
@@ -264,19 +293,38 @@ function convertContentForAnthropic(content) {
 }
 
 function convertMessagesForAnthropic(messages) {
-    if (!messages) return messages;
+    return mapMessageContent(messages, convertContentForAnthropic);
+}
+
+// Gemini parts are untyped: text is {text}, an inline image is {inlineData}.
+// gemini.js's toParts() passes an array straight through — it assumes anything
+// array-shaped already came from its own buildContentArray — so the conversion
+// has to happen here or the parts reach generateContent as OpenAI blocks.
+function convertContentForGemini(content) {
+    if (!Array.isArray(content)) return content;
     var out = [];
-    for (var i = 0; i < messages.length; i++) {
-        var m = messages[i];
-        if (m && Array.isArray(m.content)) {
-            var copy = _shallowCopy(m);
-            copy.content = convertContentForAnthropic(m.content);
-            out.push(copy);
-        } else {
-            out.push(m);
+    for (var i = 0; i < content.length; i++) {
+        var part = content[i];
+        if (!part) continue;
+        if (part.type === "text") {
+            out.push({ text: part.text || "" });
+            continue;
         }
+        if (part.type === "image_url" && part.image_url && typeof part.image_url.url === "string") {
+            var m = /^data:([^;]+);base64,(.*)$/.exec(part.image_url.url);
+            if (m)
+                out.push({ inlineData: { mimeType: m[1], data: m[2] } });
+            // generateContent has no remote-URL part; dropping a non-data URL
+            // beats sending a block the API rejects outright.
+            continue;
+        }
+        out.push(part);
     }
     return out;
+}
+
+function convertMessagesForGemini(messages) {
+    return mapMessageContent(messages, convertContentForGemini);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,9 +411,6 @@ function sendStreaming(opts) {
     var model = opts.model;
     var staticProtocol = protocolFor(opts);
 
-    // Only a defaulted "chat" route may be retried — see RETRY SCOPE.
-    var retryable = (staticProtocol === "chat");
-
     var triedFormats = {};
     var failures = [];
 
@@ -406,20 +451,20 @@ function sendStreaming(opts) {
         triedFormats[format] = true;
 
         var o = copyOpts(opts);
-        // The payload was built in `staticProtocol` shape. When that is "chat"
-        // and we are trying something else, convert; otherwise it is already
-        // correct and must be left alone.
-        if (format !== staticProtocol) {
-            if (format === "anthropic") {
-                o.tools = toAnthropicTools(opts.tools);
-                o.messages = convertMessagesForAnthropic(opts.messages);
-            } else if (format === "responses") {
-                o.usesResponsesAPI = true;
-                o.tools = toResponsesTools(opts.tools);
-                o.messages = convertMessagesForResponses(opts.messages);
-            }
+        // opts.tools/messages are always in neutral chat shape, whatever the
+        // route — so convert for every non-chat format, first attempt included.
+        // Always converting from the same source is what makes the formats
+        // reachable in any order.
+        if (format === "anthropic") {
+            o.tools = toAnthropicTools(opts.tools);
+            o.messages = convertMessagesForAnthropic(opts.messages);
         } else if (format === "responses") {
             o.usesResponsesAPI = true;
+            o.tools = toResponsesTools(opts.tools);
+            o.messages = convertMessagesForResponses(opts.messages);
+        } else if (format === "gemini") {
+            o.tools = toGeminiTools(opts.tools);
+            o.messages = convertMessagesForGemini(opts.messages);
         }
 
         o.onComplete = function(text, error, toolCalls, assistantMsg) {
@@ -430,7 +475,7 @@ function sendStreaming(opts) {
             // Retry on another wire format only when nothing was produced —
             // never after partial output, which would duplicate it.
             var producedNothing = (!text || text.length === 0) && (!toolCalls || toolCalls.length === 0);
-            if (retryable && error && producedNothing && looksLikeWrongEndpoint(status, body)) {
+            if (error && producedNothing && looksLikeWrongEndpoint(status, body)) {
                 var other = nextUntriedFormat();
                 if (other) {
                     console.warn("PlasmaLLM OpenCode: " + model + " rejected on " + format
@@ -443,9 +488,7 @@ function sendStreaming(opts) {
 
             if (!error) {
                 // Remember what worked so later turns skip the failed attempts.
-                // Guarded by `retryable` so a learned value always describes a
-                // payload that was built in chat shape.
-                if (retryable && learnedFormats[model] !== format) {
+                if (learnedFormats[model] !== format) {
                     learnedFormats[model] = format;
                 }
                 failures = [];
@@ -473,9 +516,9 @@ function sendStreaming(opts) {
         return inner;
     }
 
-    // A learned format only exists for retryable (chat-built) models.
-    var first = staticProtocol;
-    if (retryable && learnedFormats[model]) first = learnedFormats[model];
+    // The static route is the opening bid; a format proven this session beats
+    // it, since the published tables are exactly what goes stale.
+    var first = learnedFormats[model] || staticProtocol;
     start(first);
     return proxy;
 }

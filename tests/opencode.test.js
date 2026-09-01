@@ -37,8 +37,10 @@ function makeStrategy(kind) {
       }, 0);
       return { xhr, processBuffer() {}, setPollTimer() {} };
     },
-    buildTools: o => [],
-    buildContentArray: (t) => t,
+    // Tagged so a test can assert *which* adapter's builder ran, which is the
+    // whole point of the neutral-build invariant below.
+    buildTools: o => [{ builtBy: kind }],
+    buildContentArray: (t, a) => (a && a.length ? [{ builtBy: kind, text: t }] : t),
     fetchModels: () => {},
   };
 }
@@ -49,8 +51,9 @@ const i18n = (s, ...a) => a.reduce((acc, v, i) => acc.split(`%${i + 1}`).join(St
 const mod = {};
 new Function('module', 'console', 'i18n', 'Chat', 'Anthropic', 'Responses', 'Gemini', 'Route',
   strip(fs.readFileSync(UI + '/adapters/opencode.js', 'utf8'))
-  + '\nmodule.exports={sendStreaming,protocolFor,fetchModels,toAnthropicTools,toResponsesTools,'
-  + 'convertMessagesForAnthropic,convertMessagesForResponses,explainError,learnedFormats,presets};'
+  + '\nmodule.exports={sendStreaming,protocolFor,fetchModels,buildTools,buildContentArray,'
+  + 'toAnthropicTools,toResponsesTools,toGeminiTools,convertMessagesForAnthropic,'
+  + 'convertMessagesForResponses,convertMessagesForGemini,explainError,learnedFormats,presets};'
 )(mod, { warn() {} }, i18n,
   makeStrategy('chat'), makeStrategy('anthropic'), makeStrategy('responses'), makeStrategy('gemini'),
   Route);
@@ -89,6 +92,19 @@ eq('two presets, Zen and Go', OC.presets.map(p => p.name), ['OpenCode Zen', 'Ope
 eq('minimax-m3 on Go -> anthropic', OC.protocolFor({ endpoint: GO }, 'minimax-m3'), 'anthropic');
 eq('minimax-m3 on Zen -> chat (Go-only rule)', OC.protocolFor({ endpoint: ZEN }, 'minimax-m3'), 'chat');
 
+// The invariant the whole retry rests on: compose time is protocol-blind. If
+// a builder ever routes by protocol again, a payload becomes unconvertible and
+// the fallback silently posts a mis-shaped body.
+console.log('\nneutral build — compose time never routes by protocol');
+[['claude-sonnet-5', 'anthropic'], ['gpt-5.6-luna', 'responses'],
+ ['gemini-3-pro', 'gemini'], ['glm-5.3', 'chat']].forEach(([model, route]) => {
+  eq(`tools for ${model} (routes ${route}) are built by chat`,
+     OC.buildTools({ endpoint: ZEN, model }), [{ builtBy: 'chat' }]);
+  eq(`content for ${model} (routes ${route}) is built by chat`,
+     OC.buildContentArray('hi', [{ dataUrl: 'data:image/png;base64,AAA' }], { endpoint: ZEN, model }),
+     [{ builtBy: 'chat', text: 'hi' }]);
+});
+
 console.log('\ntoResponsesTools — flat schema, no function wrapper');
 eq('nested openai tool -> flat responses tool', OC.toResponsesTools([
   { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } }
@@ -115,7 +131,40 @@ eq('image_url data URL -> anthropic image block', OC.convertMessagesForAnthropic
 eq('remote image URL dropped, not sent as-is', OC.convertMessagesForAnthropic([
   { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }] }
 ]), [{ role: 'user', content: [] }]);
+// Every anthropic attempt now goes through this converter, not just retries,
+// so it has to reproduce anthropic.js's own isImageMime guard. /messages
+// rejects a non-image image block outright.
+eq('non-image data URL dropped, matching the native builder', OC.convertMessagesForAnthropic([
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:application/pdf;base64,AAA' } }] }
+]), [{ role: 'user', content: [] }]);
+eq('gemini keeps it — inlineData is not image-only', OC.convertMessagesForGemini([
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:application/pdf;base64,AAA' } }] }
+]), [{ role: 'user', content: [{ inlineData: { mimeType: 'application/pdf', data: 'AAA' } }] }]);
 eq('tool_call_id preserved through conversion', OC.convertMessagesForAnthropic([
+  { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'out' }] }
+])[0].tool_call_id, 'c1');
+
+console.log('\ntoGeminiTools — one wrapper holding every declaration');
+eq('nested openai tools -> a single functionDeclarations object', OC.toGeminiTools([
+  { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'run_command', description: 'Run', parameters: { type: 'object', properties: {} } } }
+]), [{ functionDeclarations: [
+  { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } },
+  { name: 'run_command', description: 'Run', parameters: { type: 'object', properties: {} } }
+] }]);
+eq('no tools -> [], not a wrapper around nothing', OC.toGeminiTools([]), []);
+eq('malformed tool skipped', OC.toGeminiTools([{ type: 'function' }]), []);
+
+console.log('\nconvertMessagesForGemini — chat parts -> untyped gemini parts');
+eq('text -> {text}, image_url -> {inlineData}', OC.convertMessagesForGemini([
+  { role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }] }
+]), [{ role: 'user', content: [{ text: 'hi' }, { inlineData: { mimeType: 'image/png', data: 'AAA' } }] }]);
+eq('remote image URL dropped — generateContent has no remote-URL part', OC.convertMessagesForGemini([
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }] }
+]), [{ role: 'user', content: [] }]);
+eq('string content untouched', OC.convertMessagesForGemini([{ role: 'user', content: 'plain' }]),
+   [{ role: 'user', content: 'plain' }]);
+eq('tool_call_id preserved through conversion', OC.convertMessagesForGemini([
   { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'out' }] }
 ])[0].tool_call_id, 'c1');
 
@@ -131,7 +180,7 @@ eq('tool_call_id preserved through conversion', OC.convertMessagesForAnthropic([
   r = await run('glm-5.3');
   eq('glm goes straight to chat', r.log.map(c => c.kind), ['chat']);
 
-  console.log('\nretry — bounded to models whose route DEFAULTED to chat');
+  console.log('\nretry — every route, because every payload is built neutrally');
   script = { 'newmodel-x': { chat: { status: 503, body: 'Endpoint is unavailable.' }, anthropic: { status: 200 } } };
   r = await run('newmodel-x');
   eq('falls back to messages after 503', r.log.map(c => c.kind), ['chat', 'anthropic']);
@@ -140,19 +189,48 @@ eq('tool_call_id preserved through conversion', OC.convertMessagesForAnthropic([
   r = await run('newmodel-x');
   eq('second call skips the failed format', r.log.map(c => c.kind), ['anthropic']);
 
-  // A prefix-matched route is deliberate and its payload was built in that
-  // protocol's shape, so retrying would post a mis-shaped body. Must not retry.
+  // The published tables are exactly what goes stale, so a prefix match is a
+  // strong opening bid rather than a guarantee. It is tried first and costs no
+  // extra round trip, but it no longer dead-ends when the backend moves.
   script = { 'grok-4.5': { responses: { status: 503, body: 'Endpoint is unavailable.' }, chat: { status: 200 } } };
   r = await run('grok-4.5');
-  eq('a prefix-matched model never retries into another shape', r.log.map(c => c.kind), ['responses']);
-  eq('no learned entry for a non-retryable route', OC.learnedFormats['grok-4.5'], undefined);
+  eq('a prefix-matched route is tried first, then falls back', r.log.map(c => c.kind), ['responses', 'chat']);
+  eq('and learns the format that worked', OC.learnedFormats['grok-4.5'], 'chat');
+  r = await run('grok-4.5');
+  eq('the learned format outranks the stale static route', r.log.map(c => c.kind), ['chat']);
 
   script = { 'gemini-3-pro': { gemini: { status: 503, body: 'Endpoint is unavailable.' }, chat: { status: 200 } } };
   r = await run('gemini-3-pro', [], ZEN);
-  eq('gemini is reachable and likewise never retries', r.log.map(c => c.kind), ['gemini']);
+  eq('a gemini route falls back too', r.log.map(c => c.kind), ['gemini', 'chat']);
 
-  console.log('\nconversion happens on the retry path, where the shape is wrong');
+  // Gemini is last in FALLBACK_ORDER but must actually be reachable — it was
+  // absent from the order entirely while the retry was bounded to chat.
+  script = { 'lastresort-g': {
+    chat: { status: 503, body: 'Endpoint is unavailable.' },
+    anthropic: { status: 404, body: 'not found' },
+    responses: { status: 404, body: 'not found' },
+    gemini: { status: 200 },
+  } };
+  r = await run('lastresort-g');
+  eq('walks all four formats and lands on gemini', r.log.map(c => c.kind), ['chat', 'anthropic', 'responses', 'gemini']);
+  eq('gemini fallback succeeds', r.error, null);
+
+  console.log('\nconversion happens on every non-chat attempt, first one included');
   const NESTED = [{ type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } }];
+
+  // The payload is neutral even when the static route is not chat, so the
+  // opening attempt has to convert as well. Skipping it there was what made a
+  // prefix-matched route unretryable.
+  script = { 'qwen3.7-plus': { anthropic: { status: 200 } } };
+  r = await run('qwen3.7-plus', NESTED);
+  eq('a first-attempt anthropic route gets converted tools', r.log[0].tools,
+     [{ name: 'read_file', description: 'Read', input_schema: { type: 'object', properties: {} } }]);
+
+  script = { 'gemini-3-flash': { gemini: { status: 200 } } };
+  r = await run('gemini-3-flash', NESTED, ZEN);
+  eq('a first-attempt gemini route gets a functionDeclarations wrapper', r.log[0].tools,
+     [{ functionDeclarations: [{ name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } }] }]);
+
   script = { 'shapeshift-a': { chat: { status: 503, body: 'Endpoint is unavailable.' }, anthropic: { status: 200 } } };
   r = await run('shapeshift-a', NESTED);
   eq('chat attempt sends the nested tools as built', r.log[0].tools, NESTED);

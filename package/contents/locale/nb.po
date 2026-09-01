@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PlasmaLLM\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 17:59-0400\n"
+"POT-Creation-Date: 2026-08-24 21:07-0400\n"
 "PO-Revision-Date: 2026-04-07 21:00-0400\n"
 "Last-Translator: Claude (machine translation)\n"
 "Language-Team: Norwegian Bokmål\n"
@@ -16,15 +16,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n != 1);\n"
-
-msgid "Color button"
-msgstr "Fargeknapp"
-
-msgid "Current color is %1. This button will open a color chooser dialog."
-msgstr "Gjeldende farge er %1. Denne knappen vil åpne en fargevelgerdialog."
-
-msgid "Current color is %1."
-msgstr "Gjeldende farge er %1."
 
 msgid "Request timed out after 30 seconds"
 msgstr "Forespørsel tidsavbrutt etter 30 sekunder"
@@ -84,62 +75,16 @@ msgstr ""
 "med tilpassede kommandoer. Velg en nyere modell (f.eks. Gemini 3+) eller "
 "deaktiver innebygde funksjoner i innstillinger."
 
-msgid ""
-"No custom tools configured. Add a custom tool to expose your own commands to "
-"the LLM."
+msgid "No tasks configured. Add a task to create reusable prompt shortcuts."
 msgstr ""
-"Ingen egendefinerte verktøy konfigurert. Legg til et egendefinert verktøy "
-"for å eksponere dine egne kommandoer til LLM."
+"Ingen oppgaver konfigurert. Legg til en oppgave for å opprette gjenbrukbare "
+"hurtigtaster for ledetekst."
 
 msgid "AUTO"
 msgstr "AUTO"
 
 msgid "Cancel"
 msgstr "Avbryt"
-
-msgid "Add Custom Tool"
-msgstr "Legg til egendefinert verktøy"
-
-msgid "Echoes back the message provided."
-msgstr "Ekko tilbake den angitte meldingen."
-
-msgid "Tool name (e.g. systemctl_service)"
-msgstr "Verktøynavn (f.eks. systemctl_service)"
-
-msgid "Description (instructs the LLM what this tool does)"
-msgstr "Beskrivelse (instruerer LLM om hva dette verktøyet gjør)"
-
-msgid "Command template (e.g. systemctl {action} {service})"
-msgstr "Kommandomal (f.eks. systemctl {action} {service})"
-
-msgid "Require Superuser (runs with pkexec)"
-msgstr "Krev superbruker (kjøres med pkexec)"
-
-msgid "Auto-run tool (no confirmation dialog)"
-msgstr "Kjør verktøy automatisk (ingen bekreftelsesdialog)"
-
-msgid "Update Tool"
-msgstr "Oppdater verktøy"
-
-msgid "Save Tool"
-msgstr "Lagre verktøy"
-
-msgid "A tool named \"%1\" already exists."
-msgstr "Et verktøy med navn \"%1\" finnes allerede."
-
-msgid ""
-"Custom tools allow you to expose your own commands to the LLM. Use "
-"placeholders like {variable} in the Command Template to define parameters "
-"the LLM can fill. Values provided by the LLM are automatically shell-escaped."
-msgstr ""
-"Egendefinerte verktøy lar deg eksponere dine egne kommandoer til LLM. Bruk "
-"plassholdere som {variable} i Kommandomalen for å definere parametere som "
-"LLM kan fylle ut. Verdier gitt av LLM blir automatisk shell-escaped."
-
-msgid "No tasks configured. Add a task to create reusable prompt shortcuts."
-msgstr ""
-"Ingen oppgaver konfigurert. Legg til en oppgave for å opprette gjenbrukbare "
-"hurtigtaster for ledetekst."
 
 msgid "Add Task"
 msgstr "Legg til oppgave"
@@ -180,6 +125,62 @@ msgstr "Spør før kjøring"
 msgid "Error: URL must start with http:// or https://"
 msgstr "Feil: URL må starte med http:// eller https://"
 
+msgid "Error: content exceeds max write size (%1 bytes)"
+msgstr "Feil: innhold overskrider maksimal skrivingsstørrelse (%1 byte)"
+
+msgid ""
+"Error: Invalid HTTP method. Only GET, POST, PUT, DELETE, PATCH, HEAD, "
+"OPTIONS are allowed."
+msgstr ""
+"Feil: Ugyldig HTTP-metode. Bare GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS "
+"er tillatt."
+
+msgid "Search provider %1 not supported"
+msgstr "Søkeleverandør %1 støttes ikke"
+
+msgid "Searching the web for: %1…"
+msgstr "Søker på nettet etter: %1…"
+
+msgid ""
+"This tool allows the primary assistant to retrieve original transcripts from "
+"cited message ranges. It runs automatically without asking for permission "
+"when Context Compaction is active."
+msgstr ""
+"Dette verktøyet lar hovedassistenten hente originale utskrifter fra siterte "
+"meldingsområder. Det kjører automatisk uten å be om tillatelse når "
+"kontekstkomprimering er aktiv."
+
+msgid "No command provided."
+msgstr "Ingen kommando oppgitt."
+
+msgid "Saved phrases:"
+msgstr "Lagrede fraser:"
+
+msgid ""
+"Nothing remembered yet. The assistant can save phrases with its edit_memory "
+"tool, or add them below."
+msgstr ""
+"Ingenting husket ennå. Assistenten kan lagre fraser med edit_memory-"
+"verktøyet sitt, eller legg dem til nedenfor."
+
+msgid "Edit"
+msgstr "Rediger"
+
+msgid "Save"
+msgstr "Lagre"
+
+msgid "Remove"
+msgstr "Fjern"
+
+msgid "Memory is full"
+msgstr "Minnet er fullt"
+
+msgid "Add a phrase…"
+msgstr "Legg til en frase…"
+
+msgid "Add"
+msgstr "Legg til"
+
 msgid "Ask before running commands from LLM"
 msgstr "Spør før du kjører kommandoer fra LLM"
 
@@ -218,6 +219,11 @@ msgstr ""
 msgid "Reset Session"
 msgstr "Nullstill økt"
 
+msgid "Kill persistent session (stops all processes and resets shell state)"
+msgstr ""
+"Avslutt vedvarende økt (stopper alle prosesser og nullstiller "
+"skalltilstanden)"
+
 msgid ""
 "Neither 'tmux' nor 'screen' was found on your system. Session multiplexing "
 "is unavailable."
@@ -225,21 +231,9 @@ msgstr ""
 "Verken 'tmux' eller 'screen' ble funnet på systemet ditt. Øktmultipleksing "
 "er utilgjengelig."
 
-msgid "Error: content exceeds max write size (%1 bytes)"
-msgstr "Feil: innhold overskrider maksimal skrivingsstørrelse (%1 byte)"
-
-msgid ""
-"Error: Invalid HTTP method. Only GET, POST, PUT, DELETE, PATCH, HEAD, "
-"OPTIONS are allowed."
+msgid "Manage and discover skills in the Skills settings page."
 msgstr ""
-"Feil: Ugyldig HTTP-metode. Bare GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS "
-"er tillatt."
-
-msgid "Search provider %1 not supported"
-msgstr "Søkeleverandør %1 støttes ikke"
-
-msgid "Searching the web for: %1…"
-msgstr "Søker på nettet etter: %1…"
+"Administrer og oppdag ferdigheter på innstillingssiden for ferdigheter."
 
 msgid "Ollama API"
 msgstr "Ollama API"
@@ -310,8 +304,20 @@ msgstr "Muliggjør LLM-utløste nevrale nettsøk via Exa API."
 msgid "Enables LLM-triggered web searches via Ollama's search API"
 msgstr "Muliggjør LLM-utløst nettsøk via Ollamas søke-API"
 
-msgid "No command provided."
-msgstr "Ingen kommando oppgitt."
+msgid ""
+"Runs a .sh file inside a skill folder. Per-run approval is skipped only when "
+"that skill has “Allow running skill scripts without approval” checked on the "
+"Skills settings page."
+msgstr "Kjører en .sh-fil i en ferdighetsmappe. Godkjenning per kjøring hoppes bare over når den ferdigheten har merket av for «Tillat kjøring av ferdighetsskript uten godkjenning» på innstillingssiden for ferdigheter."
+
+msgid "Color button"
+msgstr "Fargeknapp"
+
+msgid "Current color is %1. This button will open a color chooser dialog."
+msgstr "Gjeldende farge er %1. Denne knappen vil åpne en fargevelgerdialog."
+
+msgid "Current color is %1."
+msgstr "Gjeldende farge er %1."
 
 msgid "Tool Request: %1"
 msgstr "Verktøyforespørsel: %1"
@@ -324,15 +330,6 @@ msgstr "Avslå"
 
 msgid "Approve"
 msgstr "Godkjenn"
-
-msgid "Stop command"
-msgstr "Stopp kommando"
-
-msgid "Open terminal attached to this session"
-msgstr "Åpne terminal tilknyttet denne sesjonen"
-
-msgid "Copy output"
-msgstr "Kopier utdata"
 
 msgid "Microphone recording failed"
 msgstr "Mikrofonopptak mislyktes"
@@ -373,140 +370,6 @@ msgstr "Opptaket produserte ingen fil"
 msgid "Recording failed"
 msgstr "Opptak mislyktes"
 
-msgid "Speech to Text"
-msgstr "Tale til tekst"
-
-msgid "API key saved to local fallback (KWallet unavailable)."
-msgstr "API-nøkkel lagret i lokal reserve (KWallet utilgjengelig)."
-
-msgid "API key saved to KWallet."
-msgstr "API-nøkkel lagret i KWallet."
-
-msgid "API key saved to local fallback."
-msgstr "API-nøkkel lagret i lokal reserve."
-
-msgid "Set an API endpoint first."
-msgstr "Angi et API-endepunkt først."
-
-msgid "Fetching STT models…"
-msgstr "Henter STT-modeller…"
-
-msgid "Loaded %1 STT model(s)."
-msgstr "Lastet inn %1 STT-modell(er)."
-
-msgid "Voice input:"
-msgstr "Taleinndata:"
-
-msgid "Enable microphone input"
-msgstr "Aktiver mikrofoninndata"
-
-msgid ""
-"Configures the speech-to-text engine only. Transcripts use your active chat "
-"profile (General)."
-msgstr ""
-"Konfigurerer kun tale-til-tekst-motoren. Transkripsjoner bruker din aktive "
-"samtaleprofil (Generelt)."
-
-msgid "Mic button:"
-msgstr "Mikrofonknapp:"
-
-msgid "Auto"
-msgstr "Auto"
-
-msgid "Hold to talk"
-msgstr "Hold for å snakke"
-
-msgid "Toggle"
-msgstr "Veksle"
-
-msgid ""
-"Auto: click toggles recording; hold 250 ms+ for push-to-talk. Hold: press-"
-"and-hold only. Toggle: click to start/stop."
-msgstr ""
-"Auto: klikk veksler opptak; hold 250 ms+ for trykk-og-snakk. Hold: kun hold "
-"inne. Veksle: klikk for å starte/stoppe."
-
-msgid "Voice shortcut:"
-msgstr "Talesnarvei:"
-
-msgid ""
-"While PlasmaLLM is open and focused, uses the same mic mode as the button "
-"(auto: short press toggles, hold 250 ms+ is push-to-talk). Does not open the "
-"panel—use Activate widget on the Shortcuts page. Default: Ctrl+M. Clear to "
-"disable."
-msgstr ""
-"Når PlasmaLLM er åpen og fokusert, brukes samme mikrofonmodus som knappen "
-"(auto: kort trykk veksler, hold 250 ms+ er trykk-og-snakk). Åpner ikke "
-"panelet – bruk «Aktiver skjermelement» på Snarveier-siden. Standard: Ctrl+M. "
-"Tøm for å deaktivere."
-
-msgid "Transcriber"
-msgstr "Transkriberer"
-
-msgid "Provider:"
-msgstr "Leverandør:"
-
-msgid "Endpoint:"
-msgstr "Endepunkt:"
-
-msgid "Model:"
-msgstr "Modell:"
-
-msgid "Fetching…"
-msgstr "Henter…"
-
-msgid "Fetch"
-msgstr "Hent"
-
-msgid "Fetch STT models"
-msgstr "Hent STT-modeller"
-
-msgid ""
-"OpenRouter lists STT models only via transcription modalities (this page "
-"does that)."
-msgstr ""
-"OpenRouter lister STT-modeller kun via transkripsjonsmodaliteter (denne "
-"siden gjør det)."
-
-msgid "API key:"
-msgstr "API-nøkkel:"
-
-msgid "Provider API key"
-msgstr "Leverandør-API-nøkkel"
-
-msgid "Save"
-msgstr "Lagre"
-
-msgid "Save API key"
-msgstr "Lagre API-nøkkel"
-
-msgid "Options"
-msgstr "Alternativer"
-
-msgid "Language hint:"
-msgstr "Språkhint:"
-
-msgid "Optional, e.g. en or ja (empty = auto)"
-msgstr "Valgfritt, f.eks. no eller en (tom = auto)"
-
-msgid "Max recording (seconds):"
-msgstr "Maksimalt opptak (sekunder):"
-
-msgid "STT backend:"
-msgstr "STT-motor:"
-
-msgid "OpenAI-compatible transcriptions"
-msgstr "OpenAI-kompatible transkripsjoner"
-
-msgid "Speech-to-text is not configured"
-msgstr "Tale-til-tekst er ikke konfigurert"
-
-msgid "Unknown STT backend: %1"
-msgstr "Ukjent STT-motor: %1"
-
-msgid "STT backend does not support model listing"
-msgstr "STT-motoren støtter ikke listing av modeller"
-
 msgid "STT endpoint is not configured"
 msgstr "STT-endepunkt er ikke konfigurert"
 
@@ -536,6 +399,45 @@ msgstr "STT mislyktes (HTTP %1)"
 
 msgid "STT request failed: %1"
 msgstr "STT-forespørsel mislyktes: %1"
+
+msgid "No audio file to transcribe"
+msgstr "Ingen lydfil å transkribere"
+
+msgid "Invalid Whisper model id"
+msgstr "Ugyldig Whisper-modell-ID"
+
+msgid "Invalid Whisper task"
+msgstr "Ugyldig Whisper-oppgave"
+
+msgid "Invalid Whisper device"
+msgstr "Ugyldig Whisper-enhet"
+
+msgid "Whisper CLI failed (exit %1): %2"
+msgstr "Whisper-CLI mislyktes (avslutningskode %1): %2"
+
+msgid "Whisper CLI failed (exit %1)"
+msgstr "Whisper-CLI mislyktes (avslutningskode %1)"
+
+msgid "Try Device: cpu or Default in Speech to Text settings."
+msgstr "Prøv Enhet: cpu eller Standard i innstillingene for Tale til tekst."
+
+msgid "Refresh model list"
+msgstr "Oppdater modellliste"
+
+msgid "Select or enter a model"
+msgstr "Velg eller skriv inn en modell"
+
+msgid "Search or type custom model…"
+msgstr "Søk eller skriv inn tilpasset modell…"
+
+msgid "Search models…"
+msgstr "Søk etter modeller…"
+
+msgid "Use \"%1\""
+msgstr "Bruk \"%1\""
+
+msgid "Fetching…"
+msgstr "Henter…"
 
 msgid "Profile Header:"
 msgstr "Profiloverskrift:"
@@ -630,6 +532,9 @@ msgstr "Vis historikk"
 msgid "Show Copy conversation"
 msgstr "Vis Kopier samtale"
 
+msgid "Show Context compaction summary"
+msgstr "Vis sammendrag for kontekstkomprimering"
+
 msgid "Show Clear chat"
 msgstr "Vis Tøm chat"
 
@@ -639,6 +544,9 @@ msgstr "Vis Innstillinger"
 msgid "Show Pin"
 msgstr "Vis festikonet"
 
+msgid "Loaded %1 skill"
+msgstr "%1 ferdighet lastet inn"
+
 msgid "Voice message"
 msgstr "Talemelding"
 
@@ -647,6 +555,15 @@ msgstr "Feil"
 
 msgid "Web Search"
 msgstr "Nettsøk"
+
+msgid "compacted"
+msgstr "komprimert"
+
+msgid ""
+"This message has been summarized into the compacted context. Citations "
+"active."
+msgstr ""
+"Denne meldingen er oppsummert i den komprimerte konteksten. Sitater aktive."
 
 msgid ""
 "Mathtext rendering fell back to Unicode replacement (matplotlib not "
@@ -685,6 +602,11 @@ msgstr "Regenerer svar"
 msgid "Share output with assistant"
 msgstr "Del utdata med assistenten"
 
+msgid "The model loaded this skill's instructions into context before acting."
+msgstr ""
+"Modellen lastet inn instruksjonene for denne ferdigheten i konteksten før "
+"den handlet."
+
 msgid "Approve the pending tool request"
 msgstr "Godkjenn ventende verktøyforespørsel"
 
@@ -717,6 +639,9 @@ msgstr "Lagre chat til fil"
 
 msgid "Open settings"
 msgstr "Åpne innstillinger"
+
+msgid "List discovered skills and their status"
+msgstr "List opp oppdagede ferdigheter og deres status"
 
 msgid "Run a saved task (/task <name>)"
 msgstr "Kjør en lagret oppgave (/task <name>)"
@@ -780,17 +705,57 @@ msgstr "Prøv igjen fra denne meldingen?"
 msgid ""
 "This will remove %1 message(s) after this point and generate a new response."
 msgstr ""
-"Dette vil fjerne %1 melding(er) etter dette punktet og generere et nytt "
-"svar."
+"Dette vil fjerne %1 melding(er) etter dette punktet og generere et nytt svar."
 
 msgid "Retry"
 msgstr "Prøv igjen"
+
+msgid "Compacted Context Summary"
+msgstr "Sammendrag av komprimert kontekst"
+
+#, javascript-format
+msgid "Compacted up to %1%2 • Citations active"
+msgstr "Komprimert opptil %1%2 • Sitater aktive"
+
+msgid "Close"
+msgstr "Lukk"
+
+msgid "No compaction summary available."
+msgstr "Intet komprimeringssammendrag tilgjengelig."
+
+msgid "Copy"
+msgstr "Kopier"
+
+msgid "Compacting…"
+msgstr "Komprimerer…"
+
+msgid "Re-compact"
+msgstr "Komprimer på nytt"
+
+msgid "Incrementally compact new uncompacted conversation turns."
+msgstr "Komprimer nye ukomprimerte samtalerunder trinnvis."
+
+msgid "Recompact All"
+msgstr "Komprimer alt på nytt"
+
+msgid ""
+"Re-summarize the entire conversation from turn 1 from scratch, creating a "
+"fresh, unified compaction."
+msgstr ""
+"Oppsummer hele samtalen på nytt fra tur 1 fra bunnen av, og opprett en ny, "
+"enhetlig komprimering."
 
 msgid "Copy conversation"
 msgstr "Kopier samtale"
 
 msgid "Command"
 msgstr "Kommando"
+
+msgid "View compacted context summary"
+msgstr "Vis sammendrag av komprimert kontekst"
+
+msgid "Compacting context in background…"
+msgstr "Komprimerer kontekst i bakgrunnen…"
 
 msgid "Clear chat"
 msgstr "Tøm chat"
@@ -859,16 +824,11 @@ msgstr "Slipp for å sende"
 msgid "Click to start"
 msgstr "Klikk for å starte"
 
+msgid "Hold to talk"
+msgstr "Hold for å snakke"
+
 msgid "Click to toggle, hold to talk"
 msgstr "Klikk for å veksle, hold for å snakke"
-
-msgid "Kill"
-msgstr "Avslutt"
-
-msgid "Kill persistent session (stops all processes and resets shell state)"
-msgstr ""
-"Avslutt vedvarende økt (stopper alle prosesser og nullstiller "
-"skalltilstanden)"
 
 msgid "Send"
 msgstr "Send"
@@ -881,6 +841,204 @@ msgstr "Avbryt LLM-forespørsel"
 
 msgid "Drop files here to attach"
 msgstr "Slipp filer her for å legge ved"
+
+msgid "Stop command"
+msgstr "Stopp kommando"
+
+msgid "Open terminal attached to this session"
+msgstr "Åpne terminal tilknyttet denne sesjonen"
+
+msgid "Collapse result"
+msgstr "Fold sammen resultat"
+
+msgid "Copy output"
+msgstr "Kopier utdata"
+
+msgid "Context Compaction"
+msgstr "Kontekstkomprimering"
+
+msgid "(Active Chat Profile)"
+msgstr "(Aktiv chatprofil)"
+
+msgid "Unnamed Profile"
+msgstr "Navnløs profil"
+
+msgid "Active Chat Profile"
+msgstr "Aktiv chatprofil"
+
+msgid "Active Chat Profile (Fallback)"
+msgstr "Aktiv chatprofil (reserve)"
+
+msgid "Selected profile does not have an endpoint URL or model configured."
+msgstr ""
+"Den valgte profilen har ikke konfigurert en endepunkts-URL eller modell."
+
+msgid "Testing compaction call using '%1'…"
+msgstr "Tester komprimeringskall med '%1'…"
+
+msgid "Compaction test failed: %1"
+msgstr "Komprimeringstest mislyktes: %1"
+
+msgid "Compaction test succeeded!"
+msgstr "Komprimeringstest var vellykket!"
+
+msgid "Context Compaction:"
+msgstr "Kontekstkomprimering:"
+
+msgid "Enable context compaction"
+msgstr "Aktiver kontekstkomprimering"
+
+msgid ""
+"Dramatically reduces token usage and speeds up responses in long "
+"conversations by compressing older turns into a dense background summary. "
+"Keeps your chats lightweight and cost-effective while your full history "
+"remains visible."
+msgstr ""
+"Reduserer tokenbruken dramatisk og gjør svarene raskere i lange samtaler ved "
+"å komprimere eldre turer til et tett bakgrunnssammendrag. Holder chattene "
+"dine lette og kostnadseffektive mens hele loggen din forblir synlig."
+
+msgid "Compaction Profile"
+msgstr "Komprimeringsprofil"
+
+msgid "Model Profile:"
+msgstr "Modellprofil:"
+
+msgid "None"
+msgstr "Ingen"
+
+msgid ""
+"Provider: %1  |  Model: %2\n"
+"Endpoint: %3"
+msgstr ""
+"Leverandør: %1  |  Modell: %2\n"
+"Endepunkt: %3"
+
+msgid "Trigger Thresholds"
+msgstr "Utløserterskler"
+
+msgid "Trigger Condition:"
+msgstr "Utløserbetingelse:"
+
+msgid "By Character Count"
+msgstr "Etter antall tegn"
+
+msgid "By Turn Count"
+msgstr "Etter antall turer"
+
+msgid "Whichever comes first (Chars or Turns)"
+msgstr "Det som inntreffer først (tegn eller turer)"
+
+msgid "Character threshold:"
+msgstr "Tegnterskel:"
+
+msgid "chars (~%1 tokens)"
+msgstr "tegn (~%1 tokener)"
+
+msgid "Turn count interval:"
+msgstr "Intervall for antall turer:"
+
+msgid "turn (compacts after every turn)"
+msgstr "tur (komprimerer etter hver tur)"
+
+msgid "turns"
+msgstr "turer"
+
+msgid "Keep recent turns:"
+msgstr "Behold nylige turer:"
+
+msgid "full turns kept verbatim and uncompacted"
+msgstr "fulle turer beholdes ordrett og ukomprimert"
+
+msgid "Compaction Instructions"
+msgstr "Komprimeringsinstruksjoner"
+
+msgid "Instructions template:"
+msgstr "Instruksjonsmal:"
+
+msgid "Reset to Default Instructions"
+msgstr "Tilbakestill til standardinstruksjoner"
+
+msgid "Diagnostic & Testing"
+msgstr "Diagnostikk og testing"
+
+msgid ""
+"Test compaction against your selected model profile using the sample "
+"transcript below:"
+msgstr ""
+"Test komprimering mot din valgte modellprofil ved hjelp av eksempelsamtalen "
+"nedenfor:"
+
+msgid "Sample Conversation Transcript:"
+msgstr "Eksempel på samtaleutskrift:"
+
+msgid "Reset Sample"
+msgstr "Tilbakestill eksempel"
+
+msgid "Testing…"
+msgstr "Tester…"
+
+msgid "Test Compaction Connection"
+msgstr "Test komprimeringsforbindelse"
+
+msgid "Model Summary Response:"
+msgstr "Modellsammendragssvar:"
+
+msgid ""
+"No custom tools configured. Add a custom tool to expose your own commands to "
+"the LLM."
+msgstr ""
+"Ingen egendefinerte verktøy konfigurert. Legg til et egendefinert verktøy "
+"for å eksponere dine egne kommandoer til LLM."
+
+msgid "Add Custom Tool"
+msgstr "Legg til egendefinert verktøy"
+
+msgid "Echoes back the message provided."
+msgstr "Ekko tilbake den angitte meldingen."
+
+msgid "Tool name (e.g. systemctl_service)"
+msgstr "Verktøynavn (f.eks. systemctl_service)"
+
+msgid "Description (instructs the LLM what this tool does)"
+msgstr "Beskrivelse (instruerer LLM om hva dette verktøyet gjør)"
+
+msgid "Command template (e.g. systemctl {action} {service})"
+msgstr "Kommandomal (f.eks. systemctl {action} {service})"
+
+msgid "Require Superuser (runs with pkexec)"
+msgstr "Krev superbruker (kjøres med pkexec)"
+
+msgid "Auto-run tool (no confirmation dialog)"
+msgstr "Kjør verktøy automatisk (ingen bekreftelsesdialog)"
+
+msgid "Collapse results"
+msgstr "Fold sammen resultater"
+
+msgid ""
+"Show finished results as a small pill; click the pill to view the full "
+"output."
+msgstr ""
+"Vis fullførte resultater som en liten pille; klikk på pillen for å se hele "
+"utdataene."
+
+msgid "Update Tool"
+msgstr "Oppdater verktøy"
+
+msgid "Save Tool"
+msgstr "Lagre verktøy"
+
+msgid "A tool named \"%1\" already exists."
+msgstr "Et verktøy med navn \"%1\" finnes allerede."
+
+msgid ""
+"Custom tools allow you to expose your own commands to the LLM. Use "
+"placeholders like {variable} in the Command Template to define parameters "
+"the LLM can fill. Values provided by the LLM are automatically shell-escaped."
+msgstr ""
+"Egendefinerte verktøy lar deg eksponere dine egne kommandoer til LLM. Bruk "
+"plassholdere som {variable} i Kommandomalen for å definere parametere som "
+"LLM kan fylle ut. Verdier gitt av LLM blir automatisk shell-escaped."
 
 msgid "Failed to fetch gcloud token (exit %1): %2"
 msgstr "Klarte ikke hente gcloud-token (avslutningskode %1): %2"
@@ -954,14 +1112,14 @@ msgstr "Prosjekt-ID:"
 msgid "Location:"
 msgstr "Plassering:"
 
+msgid "Provider:"
+msgstr "Leverandør:"
+
 msgid "API Endpoint:"
 msgstr "API-endepunkt:"
 
-msgid "Refreshing…"
-msgstr "Oppdaterer…"
-
-msgid "Refresh model list"
-msgstr "Oppdater modellliste"
+msgid "Model:"
+msgstr "Modell:"
 
 msgid "API Key:"
 msgstr "API-nøkkel:"
@@ -1101,6 +1259,280 @@ msgstr "sekunder"
 msgid "minutes"
 msgstr "minutter"
 
+msgid "Speech to Text"
+msgstr "Tale til tekst"
+
+msgid "Model “%1” is on disk."
+msgstr "Modell “%1” er på disken."
+
+msgid ""
+"Model “%1” is not downloaded. The first transcription will fetch it (%2) "
+"into ~/.cache/whisper and can take a long time."
+msgstr ""
+"Modell “%1” er ikke lastet ned. Den første transkripsjonen vil hente det "
+"(%2) til ~/.cache/whisper og kan ta lang tid."
+
+msgid ""
+"Model “%1” is not downloaded. The first transcription will fetch it into "
+"~/.cache/whisper and can take a long time."
+msgstr ""
+"Modell “%1” er ikke lastet ned. Den første transkripsjonen vil hente det til "
+"~/.cache/whisper og kan ta lang tid."
+
+msgid "CUDA is available to Whisper."
+msgstr "CUDA er tilgjengelig for Whisper."
+
+msgid "CUDA is not available in this Whisper environment. Use cpu or Default."
+msgstr ""
+"CUDA er ikke tilgjengelig i dette Whisper-miljøet. Bruk cpu eller Standard."
+
+msgid "Whisper CLI responded to --help."
+msgstr "Whisper-CLI svarte på --help."
+
+msgid "Whisper CLI test failed (exit %1): %2"
+msgstr "Whisper-CLI-test mislyktes (avslutningskode %1): %2"
+
+msgid "Whisper CLI test failed (exit %1). Check the command."
+msgstr ""
+"Whisper-CLI-test mislyktes (avslutningskode %1). Kontroller kommandoen."
+
+msgid "API key saved to KWallet."
+msgstr "API-nøkkel lagret i KWallet."
+
+msgid "API key saved to local fallback."
+msgstr "API-nøkkel lagret i lokal reserve."
+
+msgid "Checking whether “%1” is downloaded…"
+msgstr "Sjekker om “%1” er lastet ned…"
+
+msgid "Checking CUDA…"
+msgstr "Sjekker CUDA…"
+
+msgid "Testing Whisper CLI…"
+msgstr "Tester Whisper-CLI…"
+
+msgid "Loaded %1 STT model(s)."
+msgstr "Lastet inn %1 STT-modell(er)."
+
+msgid "Set an API endpoint first."
+msgstr "Angi et API-endepunkt først."
+
+msgid "Fetching STT models…"
+msgstr "Henter STT-modeller…"
+
+msgid "Voice input:"
+msgstr "Taleinndata:"
+
+msgid "Enable microphone input"
+msgstr "Aktiver mikrofoninndata"
+
+msgid ""
+"Configures the speech-to-text engine only. Transcripts use your active chat "
+"profile (General)."
+msgstr ""
+"Konfigurerer kun tale-til-tekst-motoren. Transkripsjoner bruker din aktive "
+"samtaleprofil (Generelt)."
+
+msgid "Mic button:"
+msgstr "Mikrofonknapp:"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Toggle"
+msgstr "Veksle"
+
+msgid ""
+"Auto: click toggles recording; hold 250 ms+ for push-to-talk. Hold: press-"
+"and-hold only. Toggle: click to start/stop."
+msgstr ""
+"Auto: klikk veksler opptak; hold 250 ms+ for trykk-og-snakk. Hold: kun hold "
+"inne. Veksle: klikk for å starte/stoppe."
+
+msgid "Voice shortcut:"
+msgstr "Talesnarvei:"
+
+msgid ""
+"While PlasmaLLM is open and focused, uses the same mic mode as the button "
+"(auto: short press toggles, hold 250 ms+ is push-to-talk). Does not open the "
+"panel—use Activate widget on the Shortcuts page. Default: Ctrl+M. Clear to "
+"disable."
+msgstr ""
+"Når PlasmaLLM er åpen og fokusert, brukes samme mikrofonmodus som knappen "
+"(auto: kort trykk veksler, hold 250 ms+ er trykk-og-snakk). Åpner ikke "
+"panelet – bruk «Aktiver skjermelement» på Snarveier-siden. Standard: Ctrl+M. "
+"Tøm for å deaktivere."
+
+msgid "Transcriber"
+msgstr "Transkriberer"
+
+msgid "STT backend:"
+msgstr "STT-motor:"
+
+msgid "Endpoint:"
+msgstr "Endepunkt:"
+
+msgid "Fetch STT models"
+msgstr "Hent STT-modeller"
+
+msgid ""
+"OpenRouter lists STT models only via transcription modalities (this page "
+"does that)."
+msgstr ""
+"OpenRouter lister STT-modeller kun via transkripsjonsmodaliteter (denne "
+"siden gjør det)."
+
+msgid "API key:"
+msgstr "API-nøkkel:"
+
+msgid "Provider API key"
+msgstr "Leverandør-API-nøkkel"
+
+msgid "Save API key"
+msgstr "Lagre API-nøkkel"
+
+msgid "Command:"
+msgstr "Kommando:"
+
+msgid ""
+"Command prefix, inserted as-is. Examples: whisper, python3 -m whisper, "
+"toolbox run whisper."
+msgstr ""
+"Kommandoprefiks, settes inn som det er. Eksempler: whisper, python3 -m "
+"whisper, toolbox run whisper."
+
+msgid "Test:"
+msgstr "Test:"
+
+msgid "Test CLI"
+msgstr "Test CLI"
+
+msgid "Task:"
+msgstr "Oppgave:"
+
+msgid "Transcribe"
+msgstr "Transkriber"
+
+msgid "Translate"
+msgstr "Oversett"
+
+msgid "Device:"
+msgstr "Enhet:"
+
+msgid "Default"
+msgstr "Standard"
+
+msgid "FP16:"
+msgstr "FP16:"
+
+msgid "Use --fp16 True (GPU)"
+msgstr "Bruk --fp16 True (GPU)"
+
+msgid "Threads:"
+msgstr "Tråder:"
+
+msgid "0 omits --threads (Whisper default). FP16 off is safer on CPU."
+msgstr "0 utelater --threads (Whisper-standard). FP16 av er tryggere på CPU."
+
+msgid "Initial prompt:"
+msgstr "Innledende ledetekst:"
+
+msgid "Optional vocabulary / style hint"
+msgstr "Valgfritt ordforråd / stilhint"
+
+msgid "Extra args:"
+msgstr "Ekstra argumenter:"
+
+msgid "Optional, appended as-is"
+msgstr "Valgfritt, legges til som det er"
+
+msgid "Options"
+msgstr "Alternativer"
+
+msgid "Language hint:"
+msgstr "Språkhint:"
+
+msgid "Optional, e.g. en or ja (empty = auto)"
+msgstr "Valgfritt, f.eks. no eller en (tom = auto)"
+
+msgid "Max recording (seconds):"
+msgstr "Maksimalt opptak (sekunder):"
+
+msgid "Speech-to-text is not configured"
+msgstr "Tale-til-tekst er ikke konfigurert"
+
+msgid "Unknown STT backend: %1"
+msgstr "Ukjent STT-motor: %1"
+
+msgid "Whisper CLI runner is not available"
+msgstr "Whisper-CLI-kjører er ikke tilgjengelig"
+
+msgid "Could not build Whisper command"
+msgstr "Kunne ikke bygge Whisper-kommando"
+
+msgid "STT backend does not support model listing"
+msgstr "STT-motoren støtter ikke listing av modeller"
+
+msgid "Enable skills"
+msgstr "Aktiver ferdigheter"
+
+msgid ""
+"Skills are reusable instruction sets the model loads on demand via the skill "
+"tool. PlasmaLLM ships built-in skills (source: bundled). Add your own to "
+"~/.local/share/plasmallm/skills/ as a folder containing SKILL.md or a self-"
+"contained <name>.md file; a user skill with the same name overrides the "
+"bundled one."
+msgstr "Ferdigheter er gjenbrukbare instruksjonssett som modellen laster inn ved behov via ferdighetsverktøyet. PlasmaLLM leveres med innebygde ferdigheter (kilde: medfølgende). Legg til dine egne i ~/.local/share/plasmallm/skills/ som en mappe som inneholder SKILL.md eller en frittstående <navn>.md-fil; en brukerferdighet med samme navn overstyrer den medfølgende."
+
+msgid ""
+"No skills discovered yet. Add a SKILL.md folder to the directory above or "
+"enable the extra directories below."
+msgstr ""
+"Ingen ferdigheter oppdaget ennå. Legg til en SKILL.md-mappe i mappen ovenfor "
+"eller aktiver de ekstra mappene nedenfor."
+
+msgid "DISABLED"
+msgstr "DEAKTIVERT"
+
+msgid "Allow running skill scripts without approval"
+msgstr "Tillat kjøring av ferdighetsskript uten godkjenning"
+
+msgid "Refreshing…"
+msgstr "Oppdaterer…"
+
+msgid "Refresh"
+msgstr "Oppdater"
+
+msgid "Open the skills directory in the file manager"
+msgstr "Åpne ferdighetsmappen i filbehandleren"
+
+msgid "Also scan ~/.claude/skills"
+msgstr "Skann også ~/.claude/skills"
+
+msgid "Also scan ~/.agents/skills"
+msgstr "Skann også ~/.agents/skills"
+
+msgid "/absolute/path/to/skills"
+msgstr "/absolutt/sti/til/ferdigheter"
+
+msgid "Save directory"
+msgstr "Lagre mappe"
+
+msgid "Add directory"
+msgstr "Legg til mappe"
+
+msgid ""
+"Enabled skills are advertised to the model by name and description; the "
+"model loads full instructions on demand with the skill tool. Loaded skill "
+"content is re-sent in full every turn and is never affected by context "
+"compaction. Toggles here are global (not per-profile)."
+msgstr ""
+"Aktiverte ferdigheter annonseres til modellen med navn og beskrivelse; "
+"modellen laster inn fullstendige instruksjoner ved behov med "
+"ferdighetsverktøyet. Innlastet ferdighetsinnhold sendes på nytt i sin helhet "
+"hver tur og påvirkes aldri av kontekstkomprimering. Brytere her er globale "
+"(ikke per profil)."
+
 msgid "System Info:"
 msgstr "Systeminformasjon:"
 
@@ -1155,10 +1587,10 @@ msgid ""
 msgstr ""
 "Dette er den fullstendige systeminstruksen som sendes til modellen. Bruk "
 "{{placeholders}} for å hente inn dynamisk innhold som systemdetaljer, "
-"aktiverte verktøy eller skrivebordsautomatiseringsinstruksjoner. Alt "
-"annet du skriver brukes ordrett. Kritiske kjøretidsinstruksjoner "
-"(styring, hopp over godkjenninger) legges til automatisk når de er "
-"aktive, selv om du fjerner plassholderen deres."
+"aktiverte verktøy eller skrivebordsautomatiseringsinstruksjoner. Alt annet "
+"du skriver brukes ordrett. Kritiske kjøretidsinstruksjoner (styring, hopp "
+"over godkjenninger) legges til automatisk når de er aktive, selv om du "
+"fjerner plassholderen deres."
 
 msgid "System Prompt:"
 msgstr "Systeminstruks:"
@@ -1176,20 +1608,24 @@ msgid "Enabled tool descriptions and guidelines from the Tools menu"
 msgstr "Aktiverte verktøybeskrivelser og retningslinjer fra Verktøy-menyen"
 
 msgid ""
+"Available skills index and instructions for skills loaded this session (from "
+"the Skills settings page)"
+msgstr ""
+"Indeks over tilgjengelige ferdigheter og instruksjoner for ferdigheter "
+"lastet inn i denne økten (fra innstillingssiden for ferdigheter)"
+
+msgid ""
 "Persistent tmux or screen session multiplexer instructions (when active)"
 msgstr ""
-"Instruksjoner for persistent tmux- eller screen-øktmultiplekser (når "
-"aktiv)"
+"Instruksjoner for persistent tmux- eller screen-øktmultiplekser (når aktiv)"
 
 msgid "Notice indicating skip-approvals mode (/auto) is active"
 msgstr ""
-"Varsel som indikerer at modus for å hoppe over godkjenninger (/auto) er "
-"aktiv"
+"Varsel som indikerer at modus for å hoppe over godkjenninger (/auto) er aktiv"
 
 msgid "Desktop automation coordinates and guidelines (when driving)"
 msgstr ""
-"Koordinater og retningslinjer for skrivebordsautomatisering (ved "
-"styring)"
+"Koordinater og retningslinjer for skrivebordsautomatisering (ved styring)"
 
 msgid "Localization:"
 msgstr "Lokalisering:"
@@ -1255,9 +1691,6 @@ msgstr "Sti-hviteliste:"
 
 msgid "Add path, e.g. $HOME/projects, /tmp"
 msgstr "Legg til sti, f.eks. $HOME/projects, /tmp"
-
-msgid "Add"
-msgstr "Legg til"
 
 msgid ""
 "Whitelist applies to file-system tools (read, write, list, search). Note: "
@@ -1363,6 +1796,9 @@ msgstr "Ingen tale oppdaget."
 msgid "Could not send transcribed message."
 msgstr "Kunne ikke sende transkribert melding."
 
+msgid "Transcription canceled"
+msgstr "Transkripsjon avbrutt"
+
 msgid "Recording too short or silent — try again."
 msgstr "Opptaket var for kort eller stille – prøv igjen."
 
@@ -1378,6 +1814,31 @@ msgid ""
 msgstr ""
 "Klarte ikke hente gcloud-token (avslutningskode %1): %2. Kontroller at "
 "gcloud er installert og autentisert."
+
+msgid ""
+"No skills found. Drop folders containing a SKILL.md into ~/.local/share/"
+"plasmallm/skills/ (configure extra directories in Settings → Skills)."
+msgstr ""
+"Ingen ferdigheter funnet. Slipp mapper som inneholder en SKILL.md i ~/.local/"
+"share/plasmallm/skills/ (konfigurer ekstra mapper i Innstillinger → "
+"Ferdigheter)."
+
+msgid "invalid:"
+msgstr "ugyldig:"
+
+msgid "disabled"
+msgstr "deaktivert"
+
+msgid "loaded"
+msgstr "lastet inn"
+
+msgid "Available skills (%1 enabled):"
+msgstr "Tilgjengelige ferdigheter (%1 aktivert):"
+
+msgid "Enable or disable individual skills in Settings → Skills."
+msgstr ""
+"Aktiver eller deaktiver individuelle ferdigheter i Innstillinger → "
+"Ferdigheter."
 
 msgid "No tool request pending to approve."
 msgstr "Ingen verktøyforespørsel venter på godkjenning."
@@ -1409,9 +1870,6 @@ msgstr ""
 
 msgid "plasmallm-desktop-driver is not detected or running."
 msgstr "plasmallm-desktop-driver er ikke oppdaget eller kjører ikke."
-
-msgid "Default"
-msgstr "Standard"
 
 msgid "Current profile: **%1**"
 msgstr "Gjeldende profil: **%1**"
@@ -1485,8 +1943,12 @@ msgstr "Feil: sti '%1' utenfor hviteliste"
 msgid "Executing %1…"
 msgstr "Kjører %1…"
 
-msgid "Session reset requested."
-msgstr "Øktnullstilling forespurt."
+msgid ""
+"Loaded '%1' skill — its full instructions were added to this conversation's "
+"context."
+msgstr ""
+"Ferdigheten '%1' er lastet inn — dens fullstendige instruksjoner ble lagt "
+"til i denne samtalens kontekst."
 
 msgid "Failed to start drive session: %1"
 msgstr "Klarte ikke å starte styringsøkt: %1"
@@ -1523,21 +1985,21 @@ msgstr ""
 "- Bruk `pkexec` i stedet for `sudo` for alle kommandoer som krever "
 "superbrukerrettigheter.\n"
 "- Kjed sammen trinn med `&&`.\n"
-"- Kommandoer kjøres ikke-interaktivt. Bruk aldri kommandoer som venter "
-"på brukerinndata (som `read`).\n"
+"- Kommandoer kjøres ikke-interaktivt. Bruk aldri kommandoer som venter på "
+"brukerinndata (som `read`).\n"
 "- Bruk `kdialog` hvis du må be brukeren om inndata eller vise en "
 "meldingsboks (f.eks. `kdialog --inputbox \"Forespørsel\"`).\n"
-"- Du må ALDRI installere pakker, endre systemkonfigurasjon, starte på "
-"nytt eller utføre handlinger som endrer systemet eller forstyrrer "
-"brukeren uten eksplisitt tillatelse.\n"
+"- Du må ALDRI installere pakker, endre systemkonfigurasjon, starte på nytt "
+"eller utføre handlinger som endrer systemet eller forstyrrer brukeren uten "
+"eksplisitt tillatelse.\n"
 "- Når tillatelse er nødvendig, spør brukeren i ren tekst først.\n"
 "- For verktøy med automatisk kjøring: Vær konservativ og foretrekk "
-"skrivebeskyttede kommandoer. Hvis en handling er potensielt "
-"forstyrrende, beskriv den i ren tekst og vent på eksplisitt "
-"brukergodkjenning før du kaller verktøyet.\n"
-"- Du MÅ foretrekke andre, mer spesifikke verktøy (som read_file, "
-"write_file, search_files osv.) hvis de kan utføre oppgaven. Bruk bare "
-"dette verktøyet hvis ingen andre verktøy er egnet."
+"skrivebeskyttede kommandoer. Hvis en handling er potensielt forstyrrende, "
+"beskriv den i ren tekst og vent på eksplisitt brukergodkjenning før du "
+"kaller verktøyet.\n"
+"- Du MÅ foretrekke andre, mer spesifikke verktøy (som read_file, write_file, "
+"search_files osv.) hvis de kan utføre oppgaven. Bruk bare dette verktøyet "
+"hvis ingen andre verktøy er egnet."
 
 msgid ""
 "Read the contents of a file at the specified path. Access is restricted to "
@@ -1550,14 +2012,13 @@ msgid ""
 "Write content to a file at the specified path. Access is restricted to "
 "allowed directories."
 msgstr ""
-"Skriver innhold til en fil på den angitte banen. Tilgang er begrenset "
-"til tillatte mapper."
+"Skriver innhold til en fil på den angitte banen. Tilgang er begrenset til "
+"tillatte mapper."
 
 msgid ""
 "List the contents of a directory. Access is restricted to allowed "
 "directories."
-msgstr ""
-"Lister innholdet i en mappe. Tilgang er begrenset til tillatte mapper."
+msgstr "Lister innholdet i en mappe. Tilgang er begrenset til tillatte mapper."
 
 msgid "Search for a pattern within files in a directory (recursive)."
 msgstr "Søker etter et mønster i filer i en mappe (rekursivt)."
@@ -1587,6 +2048,15 @@ msgstr ""
 "Utfører et nettsøk for å finne oppdatert informasjon, nyheter eller "
 "spesifikke fakta."
 
+msgid ""
+"Restore the full verbatim text and tool outputs of previously compacted "
+"messages by specifying the start and end message IDs from a cited message "
+"range."
+msgstr ""
+"Gjenopprett fullstendig ordrett tekst og verktøyutdata fra tidligere "
+"komprimerte meldinger ved å angi start- og slutt-meldings-ID-er fra et "
+"sitert meldingsområde."
+
 msgid "General"
 msgstr "Generelt"
 
@@ -1599,11 +2069,40 @@ msgstr "Systeminstruksjon"
 msgid "Tasks"
 msgstr "Oppgaver"
 
+msgid "Skills"
+msgstr "Ferdigheter"
+
 msgid "Tools"
 msgstr "Verktøy"
 
 msgid "Custom Tools"
 msgstr "Egendefinerte verktøy"
+
+#~ msgid ""
+#~ "Skills are reusable instruction sets the model loads on demand via the "
+#~ "skill tool. Add them to ~/.local/share/plasmallm/skills/ as either a "
+#~ "folder per skill containing a SKILL.md file, or a single self-contained "
+#~ "<name>.md file."
+#~ msgstr ""
+#~ "Ferdigheter er gjenbrukbare instruksjonssett som modellen laster inn ved "
+#~ "behov via ferdighetsverktøyet. Legg dem til i ~/.local/share/plasmallm/"
+#~ "skills/ som enten en mappe per ferdighet som inneholder en SKILL.md-fil, "
+#~ "eller en enkelt frittstående <navn>.md-fil."
+
+#~ msgid "Kill"
+#~ msgstr "Avslutt"
+
+#~ msgid "Session reset requested."
+#~ msgstr "Øktnullstilling forespurt."
+
+#~ msgid "API key saved to local fallback (KWallet unavailable)."
+#~ msgstr "API-nøkkel lagret i lokal reserve (KWallet utilgjengelig)."
+
+#~ msgid "Fetch"
+#~ msgstr "Hent"
+
+#~ msgid "OpenAI-compatible transcriptions"
+#~ msgstr "OpenAI-kompatible transkripsjoner"
 
 #~ msgid ""
 #~ "Anthropic enables extended thinking when effort is not Off, using the "
@@ -1682,9 +2181,6 @@ msgstr "Egendefinerte verktøy"
 
 #~ msgid "Save as script file"
 #~ msgstr "Lagre som skriptfil"
-
-#~ msgid "Copy"
-#~ msgstr "Kopier"
 
 #~ msgid "Ran"
 #~ msgstr "Kjørte"

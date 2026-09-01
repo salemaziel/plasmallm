@@ -7,7 +7,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PlasmaLLM\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 17:59-0400\n"
+"POT-Creation-Date: 2026-08-24 21:07-0400\n"
 "PO-Revision-Date: 2026-04-07 22:00-0400\n"
 "Last-Translator: Gemini CLI (machine translation)\n"
 "Language-Team: French (Canada)\n"
@@ -16,17 +16,6 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=(n > 1);\n"
-
-msgid "Color button"
-msgstr "Bouton de couleur"
-
-msgid "Current color is %1. This button will open a color chooser dialog."
-msgstr ""
-"La couleur actuelle est %1. Ce bouton ouvrira une boîte de dialogue de "
-"sélection de couleur."
-
-msgid "Current color is %1."
-msgstr "La couleur actuelle est %1."
 
 msgid "Request timed out after 30 seconds"
 msgstr "La requête a expiré après 30 secondes"
@@ -89,64 +78,16 @@ msgstr ""
 "modèle plus récent (p. ex., Gemini 3+) ou désactivez les fonctionnalités "
 "natives dans les Paramètres."
 
-msgid ""
-"No custom tools configured. Add a custom tool to expose your own commands to "
-"the LLM."
+msgid "No tasks configured. Add a task to create reusable prompt shortcuts."
 msgstr ""
-"Aucun outil personnalisé configuré. Ajoutez un outil personnalisé pour "
-"exposer vos propres commandes au LLM."
+"Aucune tâche configurée. Ajoutez une tâche pour créer des raccourcis "
+"d'invite réutilisables."
 
 msgid "AUTO"
 msgstr "AUTO"
 
 msgid "Cancel"
 msgstr "Annuler"
-
-msgid "Add Custom Tool"
-msgstr "Ajouter un outil personnalisé"
-
-msgid "Echoes back the message provided."
-msgstr "Renvoie le message fourni."
-
-msgid "Tool name (e.g. systemctl_service)"
-msgstr "Nom de l'outil (p. ex. systemctl_service)"
-
-msgid "Description (instructs the LLM what this tool does)"
-msgstr "Description (indique au LLM ce que fait cet outil)"
-
-msgid "Command template (e.g. systemctl {action} {service})"
-msgstr "Modèle de commande (p. ex. systemctl {action} {service})"
-
-msgid "Require Superuser (runs with pkexec)"
-msgstr "Nécessite les droits superutilisateur (exécuté avec pkexec)"
-
-msgid "Auto-run tool (no confirmation dialog)"
-msgstr ""
-"Exécution automatique de l'outil (sans boîte de dialogue de confirmation)"
-
-msgid "Update Tool"
-msgstr "Mettre à jour l'outil"
-
-msgid "Save Tool"
-msgstr "Enregistrer l'outil"
-
-msgid "A tool named \"%1\" already exists."
-msgstr "Un outil nommé « %1 » existe déjà."
-
-msgid ""
-"Custom tools allow you to expose your own commands to the LLM. Use "
-"placeholders like {variable} in the Command Template to define parameters "
-"the LLM can fill. Values provided by the LLM are automatically shell-escaped."
-msgstr ""
-"Les outils personnalisés vous permettent d'exposer vos propres commandes au "
-"LLM. Utilisez des espaces réservés comme {variable} dans le Modèle de "
-"Commande pour définir les paramètres que le LLM peut remplir. Les valeurs "
-"fournies par le LLM sont automatiquement échappées pour le shell."
-
-msgid "No tasks configured. Add a task to create reusable prompt shortcuts."
-msgstr ""
-"Aucune tâche configurée. Ajoutez une tâche pour créer des raccourcis "
-"d'invite réutilisables."
 
 msgid "Add Task"
 msgstr "Ajouter une tâche"
@@ -187,6 +128,62 @@ msgstr "Demander avant d'exécuter"
 
 msgid "Error: URL must start with http:// or https://"
 msgstr "Erreur : l'URL doit commencer par http:// ou https://"
+
+msgid "Error: content exceeds max write size (%1 bytes)"
+msgstr "Erreur : le contenu dépasse la taille maximale d'écriture (%1 octets)"
+
+msgid ""
+"Error: Invalid HTTP method. Only GET, POST, PUT, DELETE, PATCH, HEAD, "
+"OPTIONS are allowed."
+msgstr ""
+"Erreur : Méthode HTTP invalide. Seules GET, POST, PUT, DELETE, PATCH, HEAD, "
+"OPTIONS sont autorisées."
+
+msgid "Search provider %1 not supported"
+msgstr "Fournisseur de recherche %1 non pris en charge"
+
+msgid "Searching the web for: %1…"
+msgstr "Recherche Web pour : %1…"
+
+msgid ""
+"This tool allows the primary assistant to retrieve original transcripts from "
+"cited message ranges. It runs automatically without asking for permission "
+"when Context Compaction is active."
+msgstr ""
+"Cet outil permet à l'assistant principal de récupérer les transcriptions "
+"originales des plages de messages citées. Il s'exécute automatiquement sans "
+"demander d'autorisation lorsque le compactage de contexte est actif."
+
+msgid "No command provided."
+msgstr "Aucune commande fournie."
+
+msgid "Saved phrases:"
+msgstr "Phrases enregistrées :"
+
+msgid ""
+"Nothing remembered yet. The assistant can save phrases with its edit_memory "
+"tool, or add them below."
+msgstr ""
+"Rien n'est encore mémorisé. L'assistant peut enregistrer des phrases avec "
+"son outil edit_memory, ou les ajouter ci-dessous."
+
+msgid "Edit"
+msgstr "Modifier"
+
+msgid "Save"
+msgstr "Enregistrer"
+
+msgid "Remove"
+msgstr "Supprimer"
+
+msgid "Memory is full"
+msgstr "La mémoire est pleine"
+
+msgid "Add a phrase…"
+msgstr "Ajouter une phrase…"
+
+msgid "Add"
+msgstr "Ajouter"
 
 msgid "Ask before running commands from LLM"
 msgstr "Demander avant d'exécuter les commandes du LLM"
@@ -229,6 +226,11 @@ msgstr ""
 msgid "Reset Session"
 msgstr "Réinitialiser la session"
 
+msgid "Kill persistent session (stops all processes and resets shell state)"
+msgstr ""
+"Tuer la session persistante (arrête tous les processus et réinitialise "
+"l'état du shell)"
+
 msgid ""
 "Neither 'tmux' nor 'screen' was found on your system. Session multiplexing "
 "is unavailable."
@@ -236,21 +238,9 @@ msgstr ""
 "Ni 'tmux' ni 'screen' n'ont été trouvés sur votre système. Le multiplexage "
 "de session est indisponible."
 
-msgid "Error: content exceeds max write size (%1 bytes)"
-msgstr "Erreur : le contenu dépasse la taille maximale d'écriture (%1 octets)"
-
-msgid ""
-"Error: Invalid HTTP method. Only GET, POST, PUT, DELETE, PATCH, HEAD, "
-"OPTIONS are allowed."
+msgid "Manage and discover skills in the Skills settings page."
 msgstr ""
-"Erreur : Méthode HTTP invalide. Seules GET, POST, PUT, DELETE, PATCH, HEAD, "
-"OPTIONS sont autorisées."
-
-msgid "Search provider %1 not supported"
-msgstr "Fournisseur de recherche %1 non pris en charge"
-
-msgid "Searching the web for: %1…"
-msgstr "Recherche Web pour : %1…"
+"Gérez et découvrez des compétences dans la page des paramètres Compétences."
 
 msgid "Ollama API"
 msgstr "API Ollama"
@@ -324,8 +314,22 @@ msgstr ""
 "Active les recherches Web déclenchées par le LLM via l'API de recherche "
 "d'Ollama"
 
-msgid "No command provided."
-msgstr "Aucune commande fournie."
+msgid ""
+"Runs a .sh file inside a skill folder. Per-run approval is skipped only when "
+"that skill has “Allow running skill scripts without approval” checked on the "
+"Skills settings page."
+msgstr "Exécute un fichier .sh dans un dossier de compétence. L'approbation par exécution n'est ignorée que lorsque cette compétence a l'option « Autoriser l'exécution des scripts de compétences sans approbation » cochée sur la page des paramètres des compétences."
+
+msgid "Color button"
+msgstr "Bouton de couleur"
+
+msgid "Current color is %1. This button will open a color chooser dialog."
+msgstr ""
+"La couleur actuelle est %1. Ce bouton ouvrira une boîte de dialogue de "
+"sélection de couleur."
+
+msgid "Current color is %1."
+msgstr "La couleur actuelle est %1."
 
 msgid "Tool Request: %1"
 msgstr "Demande d'outil : %1"
@@ -338,15 +342,6 @@ msgstr "Refuser"
 
 msgid "Approve"
 msgstr "Approuver"
-
-msgid "Stop command"
-msgstr "Arrêter la commande"
-
-msgid "Open terminal attached to this session"
-msgstr "Ouvrir le terminal associé à cette session"
-
-msgid "Copy output"
-msgstr "Copier la sortie"
 
 msgid "Microphone recording failed"
 msgstr "L'enregistrement du microphone a échoué"
@@ -389,141 +384,6 @@ msgstr "L'enregistrement n'a produit aucun fichier"
 msgid "Recording failed"
 msgstr "L'enregistrement a échoué"
 
-msgid "Speech to Text"
-msgstr "Reconnaissance vocale"
-
-msgid "API key saved to local fallback (KWallet unavailable)."
-msgstr "Clé API enregistrée dans le secours local (KWallet indisponible)."
-
-msgid "API key saved to KWallet."
-msgstr "Clé API enregistrée dans KWallet."
-
-msgid "API key saved to local fallback."
-msgstr "Clé API enregistrée dans le secours local."
-
-msgid "Set an API endpoint first."
-msgstr "Définissez d'abord un point d'accès API."
-
-msgid "Fetching STT models…"
-msgstr "Récupération des modèles STT…"
-
-msgid "Loaded %1 STT model(s)."
-msgstr "%1 modèle(s) STT chargé(s)."
-
-msgid "Voice input:"
-msgstr "Entrée vocale :"
-
-msgid "Enable microphone input"
-msgstr "Activer l'entrée microphone"
-
-msgid ""
-"Configures the speech-to-text engine only. Transcripts use your active chat "
-"profile (General)."
-msgstr ""
-"Configure uniquement le moteur de reconnaissance vocale. Les transcriptions "
-"utilisent votre profil de discussion actif (Général)."
-
-msgid "Mic button:"
-msgstr "Bouton du micro :"
-
-msgid "Auto"
-msgstr "Auto"
-
-msgid "Hold to talk"
-msgstr "Maintenir pour parler"
-
-msgid "Toggle"
-msgstr "Basculer"
-
-msgid ""
-"Auto: click toggles recording; hold 250 ms+ for push-to-talk. Hold: press-"
-"and-hold only. Toggle: click to start/stop."
-msgstr ""
-"Auto : un clic bascule l'enregistrement ; maintenir 250 ms+ pour le push-to-"
-"talk. Maintenir : maintenir enfoncé uniquement. Basculer : cliquer pour "
-"démarrer/arrêter."
-
-msgid "Voice shortcut:"
-msgstr "Raccourci vocal :"
-
-msgid ""
-"While PlasmaLLM is open and focused, uses the same mic mode as the button "
-"(auto: short press toggles, hold 250 ms+ is push-to-talk). Does not open the "
-"panel—use Activate widget on the Shortcuts page. Default: Ctrl+M. Clear to "
-"disable."
-msgstr ""
-"Lorsque PlasmaLLM est ouvert et actif, utilise le même mode de micro que le "
-"bouton (auto : appui court pour basculer, maintien de 250 ms+ pour push-to-"
-"talk). N'ouvre pas le panneau — utilisez « Activer le composant » sur la "
-"page Raccourcis. Par défaut : Ctrl+M. Effacer pour désactiver."
-
-msgid "Transcriber"
-msgstr "Transcripteur"
-
-msgid "Provider:"
-msgstr "Fournisseur :"
-
-msgid "Endpoint:"
-msgstr "Point d'accès :"
-
-msgid "Model:"
-msgstr "Modèle :"
-
-msgid "Fetching…"
-msgstr "Récupération…"
-
-msgid "Fetch"
-msgstr "Récupérer"
-
-msgid "Fetch STT models"
-msgstr "Récupérer les modèles STT"
-
-msgid ""
-"OpenRouter lists STT models only via transcription modalities (this page "
-"does that)."
-msgstr ""
-"OpenRouter ne liste les modèles STT que via les modalités de transcription "
-"(ce que fait cette page)."
-
-msgid "API key:"
-msgstr "Clé API :"
-
-msgid "Provider API key"
-msgstr "Clé API du fournisseur"
-
-msgid "Save"
-msgstr "Enregistrer"
-
-msgid "Save API key"
-msgstr "Enregistrer la clé API"
-
-msgid "Options"
-msgstr "Options"
-
-msgid "Language hint:"
-msgstr "Indication de langue :"
-
-msgid "Optional, e.g. en or ja (empty = auto)"
-msgstr "Facultatif, ex. fr ou en (vide = auto)"
-
-msgid "Max recording (seconds):"
-msgstr "Enregistrement max (secondes) :"
-
-msgid "STT backend:"
-msgstr "Moteur STT :"
-
-msgid "OpenAI-compatible transcriptions"
-msgstr "Transcriptions compatibles OpenAI"
-
-msgid "Speech-to-text is not configured"
-msgstr "La reconnaissance vocale n'est pas configurée"
-
-msgid "Unknown STT backend: %1"
-msgstr "Moteur STT inconnu : %1"
-
-msgid "STT backend does not support model listing"
-msgstr "Le moteur STT ne prend pas en charge la liste des modèles"
-
 msgid "STT endpoint is not configured"
 msgstr "Le point d'accès STT n'est pas configuré"
 
@@ -553,6 +413,47 @@ msgstr "STT a échoué (HTTP %1)"
 
 msgid "STT request failed: %1"
 msgstr "La demande STT a échoué : %1"
+
+msgid "No audio file to transcribe"
+msgstr "Aucun fichier audio à transcrire"
+
+msgid "Invalid Whisper model id"
+msgstr "Identifiant de modèle Whisper non valide"
+
+msgid "Invalid Whisper task"
+msgstr "Tâche Whisper non valide"
+
+msgid "Invalid Whisper device"
+msgstr "Périphérique Whisper non valide"
+
+msgid "Whisper CLI failed (exit %1): %2"
+msgstr "Le CLI Whisper a échoué (sortie %1) : %2"
+
+msgid "Whisper CLI failed (exit %1)"
+msgstr "Le CLI Whisper a échoué (sortie %1)"
+
+msgid "Try Device: cpu or Default in Speech to Text settings."
+msgstr ""
+"Essayez Périphérique : cpu ou Par défaut dans les paramètres de "
+"Reconnaissance vocale."
+
+msgid "Refresh model list"
+msgstr "Actualiser la liste des modèles"
+
+msgid "Select or enter a model"
+msgstr "Sélectionnez ou saisissez un modèle"
+
+msgid "Search or type custom model…"
+msgstr "Rechercher ou saisir un modèle personnalisé…"
+
+msgid "Search models…"
+msgstr "Rechercher des modèles…"
+
+msgid "Use \"%1\""
+msgstr "Utiliser « %1 »"
+
+msgid "Fetching…"
+msgstr "Récupération…"
 
 msgid "Profile Header:"
 msgstr "En-tête de profil :"
@@ -647,6 +548,9 @@ msgstr "Afficher l'historique"
 msgid "Show Copy conversation"
 msgstr "Afficher Copier la conversation"
 
+msgid "Show Context compaction summary"
+msgstr "Afficher le résumé du compactage de contexte"
+
 msgid "Show Clear chat"
 msgstr "Afficher Effacer le clavardage"
 
@@ -656,6 +560,9 @@ msgstr "Afficher les Paramètres"
 msgid "Show Pin"
 msgstr "Afficher l'épingle"
 
+msgid "Loaded %1 skill"
+msgstr "Compétence %1 chargée"
+
 msgid "Voice message"
 msgstr "Message vocal"
 
@@ -664,6 +571,14 @@ msgstr "Erreur"
 
 msgid "Web Search"
 msgstr "Recherche Web"
+
+msgid "compacted"
+msgstr "compacté"
+
+msgid ""
+"This message has been summarized into the compacted context. Citations "
+"active."
+msgstr "Ce message a été résumé dans le contexte compacté. Citations actives."
 
 msgid ""
 "Mathtext rendering fell back to Unicode replacement (matplotlib not "
@@ -702,6 +617,11 @@ msgstr "Régénérer la réponse"
 msgid "Share output with assistant"
 msgstr "Partager la sortie avec l'assistant"
 
+msgid "The model loaded this skill's instructions into context before acting."
+msgstr ""
+"Le modèle a chargé les instructions de cette compétence dans le contexte "
+"avant d'agir."
+
 msgid "Approve the pending tool request"
 msgstr "Approuver la demande d'outil en attente"
 
@@ -735,6 +655,9 @@ msgstr "Enregistrer le clavardage dans un fichier"
 
 msgid "Open settings"
 msgstr "Ouvrir les paramètres"
+
+msgid "List discovered skills and their status"
+msgstr "Lister les compétences découvertes et leur état"
 
 msgid "Run a saved task (/task <name>)"
 msgstr "Exécuter une tâche enregistrée (/task <nom>)"
@@ -800,16 +723,60 @@ msgstr "Réessayer à partir de ce message ?"
 msgid ""
 "This will remove %1 message(s) after this point and generate a new response."
 msgstr ""
-"Cela supprimera %1 message(s) après ce point et générera une nouvelle réponse."
+"Cela supprimera %1 message(s) après ce point et générera une nouvelle "
+"réponse."
 
 msgid "Retry"
 msgstr "Réessayer"
+
+msgid "Compacted Context Summary"
+msgstr "Résumé du contexte compacté"
+
+#, javascript-format
+msgid "Compacted up to %1%2 • Citations active"
+msgstr "Compacté jusqu'à %1%2 • Citations actives"
+
+msgid "Close"
+msgstr "Fermer"
+
+msgid "No compaction summary available."
+msgstr "Aucun résumé de compactage disponible."
+
+msgid "Copy"
+msgstr "Copier"
+
+msgid "Compacting…"
+msgstr "Compactage en cours…"
+
+msgid "Re-compact"
+msgstr "Recompacter"
+
+msgid "Incrementally compact new uncompacted conversation turns."
+msgstr ""
+"Compacter de manière incrémentielle les nouveaux tours de clavardage non "
+"compactés."
+
+msgid "Recompact All"
+msgstr "Tout recompacter"
+
+msgid ""
+"Re-summarize the entire conversation from turn 1 from scratch, creating a "
+"fresh, unified compaction."
+msgstr ""
+"Résumer à nouveau tout le clavardage depuis le tour 1 à partir de zéro, en "
+"créant un compactage unifié et actualisé."
 
 msgid "Copy conversation"
 msgstr "Copier la conversation"
 
 msgid "Command"
 msgstr "Commande"
+
+msgid "View compacted context summary"
+msgstr "Afficher le résumé du contexte compacté"
+
+msgid "Compacting context in background…"
+msgstr "Compactage du contexte en arrière-plan…"
 
 msgid "Clear chat"
 msgstr "Effacer le clavardage"
@@ -878,16 +845,11 @@ msgstr "Relâcher pour envoyer"
 msgid "Click to start"
 msgstr "Cliquer pour démarrer"
 
+msgid "Hold to talk"
+msgstr "Maintenir pour parler"
+
 msgid "Click to toggle, hold to talk"
 msgstr "Cliquer pour basculer, maintenir pour parler"
-
-msgid "Kill"
-msgstr "Tuer"
-
-msgid "Kill persistent session (stops all processes and resets shell state)"
-msgstr ""
-"Tuer la session persistante (arrête tous les processus et réinitialise "
-"l'état du shell)"
 
 msgid "Send"
 msgstr "Envoyer"
@@ -900,6 +862,208 @@ msgstr "Annuler la requête au LLM"
 
 msgid "Drop files here to attach"
 msgstr "Déposer des fichiers ici pour les joindre"
+
+msgid "Stop command"
+msgstr "Arrêter la commande"
+
+msgid "Open terminal attached to this session"
+msgstr "Ouvrir le terminal associé à cette session"
+
+msgid "Collapse result"
+msgstr "Replier le résultat"
+
+msgid "Copy output"
+msgstr "Copier la sortie"
+
+msgid "Context Compaction"
+msgstr "Compactage de contexte"
+
+msgid "(Active Chat Profile)"
+msgstr "(Profil de clavardage actif)"
+
+msgid "Unnamed Profile"
+msgstr "Profil sans nom"
+
+msgid "Active Chat Profile"
+msgstr "Profil de clavardage actif"
+
+msgid "Active Chat Profile (Fallback)"
+msgstr "Profil de clavardage actif (repli)"
+
+msgid "Selected profile does not have an endpoint URL or model configured."
+msgstr ""
+"Le profil sélectionné n'a pas d'URL de point de terminaison ou de modèle "
+"configuré."
+
+msgid "Testing compaction call using '%1'…"
+msgstr "Test de l'appel de compactage à l'aide de '%1'…"
+
+msgid "Compaction test failed: %1"
+msgstr "Échec du test de compactage : %1"
+
+msgid "Compaction test succeeded!"
+msgstr "Le test de compactage a réussi !"
+
+msgid "Context Compaction:"
+msgstr "Compactage de contexte :"
+
+msgid "Enable context compaction"
+msgstr "Activer le compactage de contexte"
+
+msgid ""
+"Dramatically reduces token usage and speeds up responses in long "
+"conversations by compressing older turns into a dense background summary. "
+"Keeps your chats lightweight and cost-effective while your full history "
+"remains visible."
+msgstr ""
+"Réduit considérablement l'utilisation de jetons et accélère les réponses "
+"dans les longues conversations en compressant les tours précédents en un "
+"résumé dense en arrière-plan. Garde vos clavardages légers et économiques "
+"tout en maintenant l'historique complet visible."
+
+msgid "Compaction Profile"
+msgstr "Profil de compactage"
+
+msgid "Model Profile:"
+msgstr "Profil de modèle :"
+
+msgid "None"
+msgstr "Aucun"
+
+msgid ""
+"Provider: %1  |  Model: %2\n"
+"Endpoint: %3"
+msgstr ""
+"Fournisseur : %1  |  Modèle : %2\n"
+"Point de terminaison : %3"
+
+msgid "Trigger Thresholds"
+msgstr "Seuils de déclenchement"
+
+msgid "Trigger Condition:"
+msgstr "Condition de déclenchement :"
+
+msgid "By Character Count"
+msgstr "Par nombre de caractères"
+
+msgid "By Turn Count"
+msgstr "Par nombre de tours"
+
+msgid "Whichever comes first (Chars or Turns)"
+msgstr "Le premier atteint (caractères ou tours)"
+
+msgid "Character threshold:"
+msgstr "Seuil de caractères :"
+
+msgid "chars (~%1 tokens)"
+msgstr "caractères (~%1 jetons)"
+
+msgid "Turn count interval:"
+msgstr "Intervalle de tours :"
+
+msgid "turn (compacts after every turn)"
+msgstr "tour (compactage après chaque tour)"
+
+msgid "turns"
+msgstr "tours"
+
+msgid "Keep recent turns:"
+msgstr "Conserver les tours récents :"
+
+msgid "full turns kept verbatim and uncompacted"
+msgstr "tours complets conservés textuellement et non compactés"
+
+msgid "Compaction Instructions"
+msgstr "Instructions de compactage"
+
+msgid "Instructions template:"
+msgstr "Modèle d'instructions :"
+
+msgid "Reset to Default Instructions"
+msgstr "Rétablir les instructions par défaut"
+
+msgid "Diagnostic & Testing"
+msgstr "Diagnostic et tests"
+
+msgid ""
+"Test compaction against your selected model profile using the sample "
+"transcript below:"
+msgstr ""
+"Testez le compactage avec le profil de modèle sélectionné en utilisant "
+"l'exemple de transcription ci-dessous :"
+
+msgid "Sample Conversation Transcript:"
+msgstr "Exemple de transcription de clavardage :"
+
+msgid "Reset Sample"
+msgstr "Réinitialiser l'exemple"
+
+msgid "Testing…"
+msgstr "Test en cours…"
+
+msgid "Test Compaction Connection"
+msgstr "Tester la connexion de compactage"
+
+msgid "Model Summary Response:"
+msgstr "Réponse du résumé du modèle :"
+
+msgid ""
+"No custom tools configured. Add a custom tool to expose your own commands to "
+"the LLM."
+msgstr ""
+"Aucun outil personnalisé configuré. Ajoutez un outil personnalisé pour "
+"exposer vos propres commandes au LLM."
+
+msgid "Add Custom Tool"
+msgstr "Ajouter un outil personnalisé"
+
+msgid "Echoes back the message provided."
+msgstr "Renvoie le message fourni."
+
+msgid "Tool name (e.g. systemctl_service)"
+msgstr "Nom de l'outil (p. ex. systemctl_service)"
+
+msgid "Description (instructs the LLM what this tool does)"
+msgstr "Description (indique au LLM ce que fait cet outil)"
+
+msgid "Command template (e.g. systemctl {action} {service})"
+msgstr "Modèle de commande (p. ex. systemctl {action} {service})"
+
+msgid "Require Superuser (runs with pkexec)"
+msgstr "Nécessite les droits superutilisateur (exécuté avec pkexec)"
+
+msgid "Auto-run tool (no confirmation dialog)"
+msgstr ""
+"Exécution automatique de l'outil (sans boîte de dialogue de confirmation)"
+
+msgid "Collapse results"
+msgstr "Replier les résultats"
+
+msgid ""
+"Show finished results as a small pill; click the pill to view the full "
+"output."
+msgstr ""
+"Afficher les résultats terminés sous forme de pastille ; cliquez sur la "
+"pastille pour voir la sortie complète."
+
+msgid "Update Tool"
+msgstr "Mettre à jour l'outil"
+
+msgid "Save Tool"
+msgstr "Enregistrer l'outil"
+
+msgid "A tool named \"%1\" already exists."
+msgstr "Un outil nommé « %1 » existe déjà."
+
+msgid ""
+"Custom tools allow you to expose your own commands to the LLM. Use "
+"placeholders like {variable} in the Command Template to define parameters "
+"the LLM can fill. Values provided by the LLM are automatically shell-escaped."
+msgstr ""
+"Les outils personnalisés vous permettent d'exposer vos propres commandes au "
+"LLM. Utilisez des espaces réservés comme {variable} dans le Modèle de "
+"Commande pour définir les paramètres que le LLM peut remplir. Les valeurs "
+"fournies par le LLM sont automatiquement échappées pour le shell."
 
 msgid "Failed to fetch gcloud token (exit %1): %2"
 msgstr "Impossible de récupérer le jeton gcloud (sortie %1) : %2"
@@ -973,14 +1137,14 @@ msgstr "ID du projet :"
 msgid "Location:"
 msgstr "Emplacement :"
 
+msgid "Provider:"
+msgstr "Fournisseur :"
+
 msgid "API Endpoint:"
 msgstr "Point d'accès API :"
 
-msgid "Refreshing…"
-msgstr "Actualisation…"
-
-msgid "Refresh model list"
-msgstr "Actualiser la liste des modèles"
+msgid "Model:"
+msgstr "Modèle :"
 
 msgid "API Key:"
 msgstr "Clé API :"
@@ -1122,6 +1286,284 @@ msgstr "secondes"
 msgid "minutes"
 msgstr "minutes"
 
+msgid "Speech to Text"
+msgstr "Reconnaissance vocale"
+
+msgid "Model “%1” is on disk."
+msgstr "Le modèle « %1 » est sur le disque."
+
+msgid ""
+"Model “%1” is not downloaded. The first transcription will fetch it (%2) "
+"into ~/.cache/whisper and can take a long time."
+msgstr ""
+"Le modèle « %1 » n'est pas téléchargé. La première transcription le "
+"récupérera (%2) dans ~/.cache/whisper et cela peut prendre beaucoup de temps."
+
+msgid ""
+"Model “%1” is not downloaded. The first transcription will fetch it into "
+"~/.cache/whisper and can take a long time."
+msgstr ""
+"Le modèle « %1 » n'est pas téléchargé. La première transcription le "
+"récupérera dans ~/.cache/whisper et cela peut prendre beaucoup de temps."
+
+msgid "CUDA is available to Whisper."
+msgstr "CUDA est disponible pour Whisper."
+
+msgid "CUDA is not available in this Whisper environment. Use cpu or Default."
+msgstr ""
+"CUDA n'est pas disponible dans cet environnement Whisper. Utilisez cpu ou "
+"Par défaut."
+
+msgid "Whisper CLI responded to --help."
+msgstr "Le CLI Whisper a répondu à --help."
+
+msgid "Whisper CLI test failed (exit %1): %2"
+msgstr "Le test du CLI Whisper a échoué (sortie %1) : %2"
+
+msgid "Whisper CLI test failed (exit %1). Check the command."
+msgstr "Le test du CLI Whisper a échoué (sortie %1). Vérifiez la commande."
+
+msgid "API key saved to KWallet."
+msgstr "Clé API enregistrée dans KWallet."
+
+msgid "API key saved to local fallback."
+msgstr "Clé API enregistrée dans le secours local."
+
+msgid "Checking whether “%1” is downloaded…"
+msgstr "Vérification du téléchargement de « %1 »…"
+
+msgid "Checking CUDA…"
+msgstr "Vérification de CUDA…"
+
+msgid "Testing Whisper CLI…"
+msgstr "Test du CLI Whisper…"
+
+msgid "Loaded %1 STT model(s)."
+msgstr "%1 modèle(s) STT chargé(s)."
+
+msgid "Set an API endpoint first."
+msgstr "Définissez d'abord un point d'accès API."
+
+msgid "Fetching STT models…"
+msgstr "Récupération des modèles STT…"
+
+msgid "Voice input:"
+msgstr "Entrée vocale :"
+
+msgid "Enable microphone input"
+msgstr "Activer l'entrée microphone"
+
+msgid ""
+"Configures the speech-to-text engine only. Transcripts use your active chat "
+"profile (General)."
+msgstr ""
+"Configure uniquement le moteur de reconnaissance vocale. Les transcriptions "
+"utilisent votre profil de discussion actif (Général)."
+
+msgid "Mic button:"
+msgstr "Bouton du micro :"
+
+msgid "Auto"
+msgstr "Auto"
+
+msgid "Toggle"
+msgstr "Basculer"
+
+msgid ""
+"Auto: click toggles recording; hold 250 ms+ for push-to-talk. Hold: press-"
+"and-hold only. Toggle: click to start/stop."
+msgstr ""
+"Auto : un clic bascule l'enregistrement ; maintenir 250 ms+ pour le push-to-"
+"talk. Maintenir : maintenir enfoncé uniquement. Basculer : cliquer pour "
+"démarrer/arrêter."
+
+msgid "Voice shortcut:"
+msgstr "Raccourci vocal :"
+
+msgid ""
+"While PlasmaLLM is open and focused, uses the same mic mode as the button "
+"(auto: short press toggles, hold 250 ms+ is push-to-talk). Does not open the "
+"panel—use Activate widget on the Shortcuts page. Default: Ctrl+M. Clear to "
+"disable."
+msgstr ""
+"Lorsque PlasmaLLM est ouvert et actif, utilise le même mode de micro que le "
+"bouton (auto : appui court pour basculer, maintien de 250 ms+ pour push-to-"
+"talk). N'ouvre pas le panneau — utilisez « Activer le composant » sur la "
+"page Raccourcis. Par défaut : Ctrl+M. Effacer pour désactiver."
+
+msgid "Transcriber"
+msgstr "Transcripteur"
+
+msgid "STT backend:"
+msgstr "Moteur STT :"
+
+msgid "Endpoint:"
+msgstr "Point d'accès :"
+
+msgid "Fetch STT models"
+msgstr "Récupérer les modèles STT"
+
+msgid ""
+"OpenRouter lists STT models only via transcription modalities (this page "
+"does that)."
+msgstr ""
+"OpenRouter ne liste les modèles STT que via les modalités de transcription "
+"(ce que fait cette page)."
+
+msgid "API key:"
+msgstr "Clé API :"
+
+msgid "Provider API key"
+msgstr "Clé API du fournisseur"
+
+msgid "Save API key"
+msgstr "Enregistrer la clé API"
+
+msgid "Command:"
+msgstr "Commande :"
+
+msgid ""
+"Command prefix, inserted as-is. Examples: whisper, python3 -m whisper, "
+"toolbox run whisper."
+msgstr ""
+"Préfixe de commande, inséré tel quel. Exemples : whisper, python3 -m "
+"whisper, toolbox run whisper."
+
+msgid "Test:"
+msgstr "Tester :"
+
+msgid "Test CLI"
+msgstr "Tester le CLI"
+
+msgid "Task:"
+msgstr "Tâche :"
+
+msgid "Transcribe"
+msgstr "Transcrire"
+
+msgid "Translate"
+msgstr "Traduire"
+
+msgid "Device:"
+msgstr "Périphérique :"
+
+msgid "Default"
+msgstr "Défaut"
+
+msgid "FP16:"
+msgstr "FP16 :"
+
+msgid "Use --fp16 True (GPU)"
+msgstr "Utiliser --fp16 True (GPU)"
+
+msgid "Threads:"
+msgstr "Threads :"
+
+msgid "0 omits --threads (Whisper default). FP16 off is safer on CPU."
+msgstr ""
+"0 omet --threads (valeur par défaut de Whisper). La désactivation de FP16 "
+"est plus sûre sur CPU."
+
+msgid "Initial prompt:"
+msgstr "Invite initiale :"
+
+msgid "Optional vocabulary / style hint"
+msgstr "Indication facultative de vocabulaire / style"
+
+msgid "Extra args:"
+msgstr "Arguments supplémentaires :"
+
+msgid "Optional, appended as-is"
+msgstr "Facultatif, ajouté tel quel"
+
+msgid "Options"
+msgstr "Options"
+
+msgid "Language hint:"
+msgstr "Indication de langue :"
+
+msgid "Optional, e.g. en or ja (empty = auto)"
+msgstr "Facultatif, ex. fr ou en (vide = auto)"
+
+msgid "Max recording (seconds):"
+msgstr "Enregistrement max (secondes) :"
+
+msgid "Speech-to-text is not configured"
+msgstr "La reconnaissance vocale n'est pas configurée"
+
+msgid "Unknown STT backend: %1"
+msgstr "Moteur STT inconnu : %1"
+
+msgid "Whisper CLI runner is not available"
+msgstr "L'exécuteur CLI Whisper n'est pas disponible"
+
+msgid "Could not build Whisper command"
+msgstr "Impossible de construire la commande Whisper"
+
+msgid "STT backend does not support model listing"
+msgstr "Le moteur STT ne prend pas en charge la liste des modèles"
+
+msgid "Enable skills"
+msgstr "Activer les compétences"
+
+msgid ""
+"Skills are reusable instruction sets the model loads on demand via the skill "
+"tool. PlasmaLLM ships built-in skills (source: bundled). Add your own to "
+"~/.local/share/plasmallm/skills/ as a folder containing SKILL.md or a self-"
+"contained <name>.md file; a user skill with the same name overrides the "
+"bundled one."
+msgstr "Les compétences sont des ensembles d'instructions réutilisables que le modèle charge à la demande via l'outil skill. PlasmaLLM intègre des compétences natives (source : intégrées). Ajoutez les vôtres dans ~/.local/share/plasmallm/skills/ sous la forme d'un dossier contenant SKILL.md ou d'un fichier autonome <nom>.md ; une compétence utilisateur portant le même nom remplace la compétence intégrée."
+
+msgid ""
+"No skills discovered yet. Add a SKILL.md folder to the directory above or "
+"enable the extra directories below."
+msgstr ""
+"Aucune compétence découverte pour l'instant. Ajoutez un dossier avec "
+"SKILL.md dans le répertoire ci-dessus ou activez les répertoires "
+"supplémentaires ci-dessous."
+
+msgid "DISABLED"
+msgstr "DÉSACTIVÉ"
+
+msgid "Allow running skill scripts without approval"
+msgstr "Autoriser l'exécution des scripts de compétences sans approbation"
+
+msgid "Refreshing…"
+msgstr "Actualisation…"
+
+msgid "Refresh"
+msgstr "Actualiser"
+
+msgid "Open the skills directory in the file manager"
+msgstr "Ouvrir le répertoire des compétences dans le gestionnaire de fichiers"
+
+msgid "Also scan ~/.claude/skills"
+msgstr "Analyser également ~/.claude/skills"
+
+msgid "Also scan ~/.agents/skills"
+msgstr "Analyser également ~/.agents/skills"
+
+msgid "/absolute/path/to/skills"
+msgstr "/chemin/absolu/vers/skills"
+
+msgid "Save directory"
+msgstr "Enregistrer le répertoire"
+
+msgid "Add directory"
+msgstr "Ajouter un répertoire"
+
+msgid ""
+"Enabled skills are advertised to the model by name and description; the "
+"model loads full instructions on demand with the skill tool. Loaded skill "
+"content is re-sent in full every turn and is never affected by context "
+"compaction. Toggles here are global (not per-profile)."
+msgstr ""
+"Les compétences activées sont présentées au modèle par nom et description ; "
+"le modèle charge les instructions complètes à la demande avec l'outil skill. "
+"Le contenu des compétences chargées est renvoyé en totalité à chaque tour et "
+"n'est jamais affecté par le compactage de contexte. Les commutateurs ici "
+"sont globaux (non définis par profil)."
+
 msgid "System Info:"
 msgstr "Info système :"
 
@@ -1195,6 +1637,13 @@ msgstr "Informations système sélectionnées dans la liste ci-dessus"
 
 msgid "Enabled tool descriptions and guidelines from the Tools menu"
 msgstr "Descriptions et directives des outils activés depuis le menu Outils"
+
+msgid ""
+"Available skills index and instructions for skills loaded this session (from "
+"the Skills settings page)"
+msgstr ""
+"Index des compétences disponibles et instructions pour les compétences "
+"chargées durant cette session (depuis la page des paramètres Compétences)"
 
 msgid ""
 "Persistent tmux or screen session multiplexer instructions (when active)"
@@ -1274,9 +1723,6 @@ msgstr "Liste blanche des chemins :"
 
 msgid "Add path, e.g. $HOME/projects, /tmp"
 msgstr "Ajouter un chemin, p. ex. $HOME/projects, /tmp"
-
-msgid "Add"
-msgstr "Ajouter"
 
 msgid ""
 "Whitelist applies to file-system tools (read, write, list, search). Note: "
@@ -1387,6 +1833,9 @@ msgstr "Aucune parole détectée."
 msgid "Could not send transcribed message."
 msgstr "Impossible d'envoyer le message transcrit."
 
+msgid "Transcription canceled"
+msgstr "Transcription annulée"
+
 msgid "Recording too short or silent — try again."
 msgstr "Enregistrement trop court ou silencieux — réessayez."
 
@@ -1402,6 +1851,31 @@ msgid ""
 msgstr ""
 "Impossible de récupérer le jeton gcloud (sortie %1) : %2. Veuillez vous "
 "assurer que gcloud est installé et authentifié."
+
+msgid ""
+"No skills found. Drop folders containing a SKILL.md into ~/.local/share/"
+"plasmallm/skills/ (configure extra directories in Settings → Skills)."
+msgstr ""
+"Aucune compétence trouvée. Déposez des dossiers contenant un fichier "
+"SKILL.md dans ~/.local/share/plasmallm/skills/ (configurez des répertoires "
+"supplémentaires dans Paramètres → Compétences)."
+
+msgid "invalid:"
+msgstr "non valide :"
+
+msgid "disabled"
+msgstr "désactivé"
+
+msgid "loaded"
+msgstr "chargé"
+
+msgid "Available skills (%1 enabled):"
+msgstr "Compétences disponibles (%1 activée(s)) :"
+
+msgid "Enable or disable individual skills in Settings → Skills."
+msgstr ""
+"Activez ou désactivez des compétences individuelles dans Paramètres → "
+"Compétences."
 
 msgid "No tool request pending to approve."
 msgstr "Aucune demande d'outil en attente d'approbation."
@@ -1434,9 +1908,6 @@ msgstr ""
 msgid "plasmallm-desktop-driver is not detected or running."
 msgstr ""
 "plasmallm-desktop-driver n'est pas détecté ou n'est pas en cours d'exécution."
-
-msgid "Default"
-msgstr "Défaut"
 
 msgid "Current profile: **%1**"
 msgstr "Profil actuel : **%1**"
@@ -1512,8 +1983,12 @@ msgstr "Erreur : le chemin '%1' est hors de la liste blanche"
 msgid "Executing %1…"
 msgstr "Exécution de %1…"
 
-msgid "Session reset requested."
-msgstr "Réinitialisation de la session demandée."
+msgid ""
+"Loaded '%1' skill — its full instructions were added to this conversation's "
+"context."
+msgstr ""
+"Compétence '%1' chargée — ses instructions complètes ont été ajoutées au "
+"contexte de ce clavardage."
 
 msgid "Failed to start drive session: %1"
 msgstr "Impossible de démarrer la session de contrôle : %1"
@@ -1545,40 +2020,56 @@ msgid ""
 "search_files, etc.) if they can accomplish the task. Only use this tool if "
 "no other tool is suitable."
 msgstr ""
-"Exécute une commande shell sur le système de l'utilisateur et renvoie sa sortie. "
-"Directives :\n"
-"- Utilisez `pkexec` au lieu de `sudo` pour toute commande nécessitant des privilèges superutilisateur.\n"
+"Exécute une commande shell sur le système de l'utilisateur et renvoie sa "
+"sortie. Directives :\n"
+"- Utilisez `pkexec` au lieu de `sudo` pour toute commande nécessitant des "
+"privilèges superutilisateur.\n"
 "- Enchaînez les étapes avec `&&`.\n"
-"- Les commandes s'exécutent de façon non interactive. N'utilisez jamais de commandes attendant une saisie utilisateur (comme `read`).\n"
-"- Utilisez `kdialog` si vous devez demander une saisie à l'utilisateur ou afficher une boîte de message (ex. : `kdialog --inputbox \"Invite\"`).\n"
-"- N'installez JAMAIS de paquets, ne modifiez pas la configuration du système, ne redémarrez pas et n'effectuez aucune action qui altère le système ou perturbe l'utilisateur sans autorisation explicite.\n"
-"- Lorsqu'une autorisation est nécessaire, demandez d'abord à l'utilisateur en texte brut.\n"
-"- Pour les outils en exécution automatique : Soyez prudent et privilégiez les commandes en lecture seule. Si une action est potentiellement perturbatrice, décrivez-la en texte brut et attendez l'approbation explicite de l'utilisateur avant d'appeler l'outil.\n"
-"- Vous DEVEZ préférer d'autres outils plus spécifiques (comme read_file, write_file, search_files, etc.) s'ils peuvent accomplir la tâche. N'utilisez cet outil que si aucun autre outil ne convient."
+"- Les commandes s'exécutent de façon non interactive. N'utilisez jamais de "
+"commandes attendant une saisie utilisateur (comme `read`).\n"
+"- Utilisez `kdialog` si vous devez demander une saisie à l'utilisateur ou "
+"afficher une boîte de message (ex. : `kdialog --inputbox \"Invite\"`).\n"
+"- N'installez JAMAIS de paquets, ne modifiez pas la configuration du "
+"système, ne redémarrez pas et n'effectuez aucune action qui altère le "
+"système ou perturbe l'utilisateur sans autorisation explicite.\n"
+"- Lorsqu'une autorisation est nécessaire, demandez d'abord à l'utilisateur "
+"en texte brut.\n"
+"- Pour les outils en exécution automatique : Soyez prudent et privilégiez "
+"les commandes en lecture seule. Si une action est potentiellement "
+"perturbatrice, décrivez-la en texte brut et attendez l'approbation explicite "
+"de l'utilisateur avant d'appeler l'outil.\n"
+"- Vous DEVEZ préférer d'autres outils plus spécifiques (comme read_file, "
+"write_file, search_files, etc.) s'ils peuvent accomplir la tâche. N'utilisez "
+"cet outil que si aucun autre outil ne convient."
 
 msgid ""
 "Read the contents of a file at the specified path. Access is restricted to "
 "allowed directories."
 msgstr ""
-"Lit le contenu d'un fichier au chemin spécifié. L'accès est restreint aux répertoires autorisés."
+"Lit le contenu d'un fichier au chemin spécifié. L'accès est restreint aux "
+"répertoires autorisés."
 
 msgid ""
 "Write content to a file at the specified path. Access is restricted to "
 "allowed directories."
 msgstr ""
-"Écrit du contenu dans un fichier au chemin spécifié. L'accès est restreint aux répertoires autorisés."
+"Écrit du contenu dans un fichier au chemin spécifié. L'accès est restreint "
+"aux répertoires autorisés."
 
 msgid ""
 "List the contents of a directory. Access is restricted to allowed "
 "directories."
 msgstr ""
-"Liste le contenu d'un répertoire. L'accès est restreint aux répertoires autorisés."
+"Liste le contenu d'un répertoire. L'accès est restreint aux répertoires "
+"autorisés."
 
 msgid "Search for a pattern within files in a directory (recursive)."
 msgstr "Recherche un motif dans les fichiers d'un répertoire (récursif)."
 
 msgid "Perform an HTTP GET request to a URL and return the response content."
-msgstr "Effectue une requête HTTP GET vers une URL et renvoie le contenu de la réponse."
+msgstr ""
+"Effectue une requête HTTP GET vers une URL et renvoie le contenu de la "
+"réponse."
 
 msgid "Perform an HTTP request (POST, PUT, etc.) to a URL."
 msgstr "Effectue une requête HTTP (POST, PUT, etc.) vers une URL."
@@ -1598,7 +2089,17 @@ msgstr "Ouvre une URL dans l'application par défaut (ex. : navigateur Web)."
 msgid ""
 "Perform a web search to find current information, news, or specific facts."
 msgstr ""
-"Effectue une recherche Web pour trouver des informations actuelles, des actualités ou des faits précis."
+"Effectue une recherche Web pour trouver des informations actuelles, des "
+"actualités ou des faits précis."
+
+msgid ""
+"Restore the full verbatim text and tool outputs of previously compacted "
+"messages by specifying the start and end message IDs from a cited message "
+"range."
+msgstr ""
+"Restaure le texte intégral textuel et les sorties d'outils des messages "
+"précédemment compactés en spécifiant les identifiants de début et de fin "
+"d'une plage de messages citée."
 
 msgid "General"
 msgstr "Général"
@@ -1612,11 +2113,40 @@ msgstr "Invite système"
 msgid "Tasks"
 msgstr "Tâches"
 
+msgid "Skills"
+msgstr "Compétences"
+
 msgid "Tools"
 msgstr "Outils"
 
 msgid "Custom Tools"
 msgstr "Outils personnalisés"
+
+#~ msgid ""
+#~ "Skills are reusable instruction sets the model loads on demand via the "
+#~ "skill tool. Add them to ~/.local/share/plasmallm/skills/ as either a "
+#~ "folder per skill containing a SKILL.md file, or a single self-contained "
+#~ "<name>.md file."
+#~ msgstr ""
+#~ "Les compétences sont des ensembles d'instructions réutilisables que le "
+#~ "modèle charge à la demande via l'outil skill. Ajoutez-les à ~/.local/"
+#~ "share/plasmallm/skills/ sous la forme d'un dossier par compétence "
+#~ "contenant un fichier SKILL.md, ou d'un fichier autonome <nom>.md unique."
+
+#~ msgid "Kill"
+#~ msgstr "Tuer"
+
+#~ msgid "Session reset requested."
+#~ msgstr "Réinitialisation de la session demandée."
+
+#~ msgid "API key saved to local fallback (KWallet unavailable)."
+#~ msgstr "Clé API enregistrée dans le secours local (KWallet indisponible)."
+
+#~ msgid "Fetch"
+#~ msgstr "Récupérer"
+
+#~ msgid "OpenAI-compatible transcriptions"
+#~ msgstr "Transcriptions compatibles OpenAI"
 
 #~ msgid ""
 #~ "Anthropic enables extended thinking when effort is not Off, using the "
@@ -1827,9 +2357,6 @@ msgstr "Outils personnalisés"
 
 #~ msgid "Save as script file"
 #~ msgstr "Enregistrer comme fichier de script"
-
-#~ msgid "Copy"
-#~ msgstr "Copier"
 
 #~ msgid "Ran"
 #~ msgstr "Exécuté"

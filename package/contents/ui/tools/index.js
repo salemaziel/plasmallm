@@ -22,6 +22,8 @@
 .import "Remember.js" as Remember
 .import "Forget.js" as Forget
 .import "Recall.js" as Recall
+.import "Skill.js" as Skill
+.import "RunSkillScript.js" as RunSkillScript
 
 .import "driver/StartSession.js" as StartSession
 .import "driver/DesktopGetState.js" as DesktopGetState
@@ -39,9 +41,17 @@ var tools = [
     { module: WebSearch, configUI: "tools/WebSearchConfig.qml" },
     { module: RestoreContext, configUI: "tools/RestoreContextConfig.qml" },
     { module: RecallAttachment, configUI: "" },
+    // Memory is served by remember/recall/forget over memoryStore.js. The
+    // upstream `edit_memory` tool (EditMemory.js, memory.js) covers the same
+    // ground against a flat KConfig list and is deliberately left unregistered
+    // — registering both would put two Memory sections in the one {{memories}}
+    // prompt slot, backed by two stores that never sync. The files stay in the
+    // tree unmodified so they keep fast-forwarding on future upstream merges.
     { module: Remember, configUI: "" },
     { module: Forget, configUI: "" },
     { module: Recall, configUI: "" },
+    { module: Skill, configUI: "" },
+    { module: RunSkillScript, configUI: "tools/RunSkillScriptConfig.qml" },
     { module: ReadFile, configUI: "tools/ReadFileConfig.qml" },
     { module: WriteFile, configUI: "tools/WriteFileConfig.qml" },
     { module: ListDir, configUI: "tools/ListDirConfig.qml" },

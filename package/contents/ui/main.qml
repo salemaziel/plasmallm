@@ -13,6 +13,8 @@ import org.kde.kirigami as Kirigami
 import org.kde.plasma.workspace.dbus as DBus
 
 import "api.js" as Api
+import "wallet.js" as Wallet
+import "walletCore.js" as WalletCore
 import "sessionRunner.js" as SessionRunner
 import "profiles.js" as Profiles
 import "toolManager.js" as ToolManager
@@ -22,6 +24,8 @@ import "contextCompactor.js" as ContextCompactor
 import "legacyChatLoader.js" as LegacyChatLoader
 import "toolCallNormalizer.js" as ToolCallNormalizer
 import "memoryStore.js" as MemoryStore
+import "skills.js" as Skills
+import "memory.js" as Memory
 
 PlasmoidItem {
     id: root
@@ -49,7 +53,6 @@ PlasmoidItem {
     }
 
     property bool isLoading: false
-    property bool sessionActive: false
     property bool _switchingProfile: false
     // Bumped on each profile/config identity change; stale wallet callbacks no-op.
     property int _configGen: 0
@@ -68,6 +71,8 @@ PlasmoidItem {
         var _en = Plasmoid.configuration.sttEnabled;
         var _ep = Plasmoid.configuration.sttApiEndpoint;
         var _model = Plasmoid.configuration.sttModelName;
+        var _backend = Plasmoid.configuration.sttBackend;
+        var _bin = Plasmoid.configuration.sttCliBinary;
         return Stt.isSttConfigured(Plasmoid.configuration);
     }
     readonly property bool voiceInputBusy: isRecording || isTranscribing
@@ -89,15 +94,6 @@ PlasmoidItem {
 
     readonly property color userColor: Plasmoid.configuration.useCustomUserColor ? Plasmoid.configuration.userColor : Kirigami.Theme.highlightColor
     readonly property color assistantColor: Plasmoid.configuration.useCustomAssistantColor ? Plasmoid.configuration.assistantColor : Qt.darker(Kirigami.Theme.alternateBackgroundColor, 1.15)
-
-    Timer {
-        id: sessionStatusTimer
-        interval: 5000
-        running: root.expanded && SessionRunner.isEnabled(Plasmoid.configuration)
-        repeat: true
-        triggeredOnStart: true
-        onTriggered: updateSessionStatus()
-    }
 
     P5Support.DataSource {
         id: latexDependenciesDetector
@@ -217,15 +213,7 @@ PlasmoidItem {
                         root.isDrivingActive = false;
                         console.log("[PlasmaLLM] Drive session disconnected. Auto mode disabled.");
                     } else {
-                        displayMessages.append({
-                            msgId: nextMsgId("d"),
-                            turnId: "",
-                            apiMsgId: "",
-                            role: "error",
-                            content: i18n("Failed to stop driving: %1", err.error || err),
-                            shared: false,
-                            timestamp: root.currentTimestamp()
-                        });
+                        root.appendDisplayMessage("error", i18n("Failed to stop driving: %1", err.error || err), { shared: false });
                     }
                 });
             }
@@ -250,6 +238,9 @@ PlasmoidItem {
     })
     property bool isCompacting: false
     property bool walletAvailable: false
+    property int _walletRetryAttempt: 0
+    property bool _walletLoadHydrate: false
+    property bool _walletLoadKeepPrevious: false
     property int toolCallDepth: 0
     readonly property bool enableToolCallLimit: Plasmoid.configuration.enableToolCallLimit
     readonly property int maxToolCallDepth: Plasmoid.configuration.maxToolCallDepth
@@ -257,6 +248,9 @@ PlasmoidItem {
     property var activeToolCalls: ({}) // sourceCmd -> { toolName, callId, displayIndex }
 
     signal responseReady(int messageIndex)
+    // Emitted after any append or height-affecting update to displayMessages so
+    // views can follow output. Removals and user-driven edits stay silent.
+    signal chatContentChanged()
     signal copyConversationRequested()
     signal populateInputRequested(string text)
     signal confirmRetryRequested(int displayIndex, int removeCount)
@@ -283,20 +277,25 @@ PlasmoidItem {
         return s;
     }
 
+    function voiceSidecarTxt(filePath) {
+        var p = String(filePath || "");
+        var slash = p.lastIndexOf("/");
+        var dot = p.lastIndexOf(".");
+        if (dot > slash)
+            return p.substring(0, dot) + ".txt";
+        return p + ".txt";
+    }
+
     function enqueueVoiceCleanup(filePath) {
         if (!filePath || String(filePath).length === 0)
             return;
         var p = String(filePath).replace(/'/g, "'\\''");
-        executable.connectSource("rm -f '" + p + "'");
+        var txt = voiceSidecarTxt(filePath).replace(/'/g, "'\\''");
+        executable.connectSource("rm -f '" + p + "' '" + txt + "'");
     }
 
     function showSttNotice(message) {
-        displayMessages.append({
-            role: "assistant",
-            content: message,
-            shared: false,
-            timestamp: currentTimestamp()
-        });
+        root.appendDisplayMessage("error", message, { shared: false });
     }
 
     /**
@@ -307,39 +306,15 @@ PlasmoidItem {
             callback(i18n("Speech-to-text is not configured"), "");
             return;
         }
-        var slot = Api.sttKeySlot(
-            Plasmoid.configuration.sttProviderName || "",
-            Plasmoid.configuration.sttApiEndpoint || ""
-        );
-
-        function closeHandle(handle) {
-            walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-        }
-
-        walletCall("open", ["kdewallet", new DBus.int64(0), "PlasmaLLM"],
-            function(handle) {
-                if (handle < 0) {
-                    callback(null, fallbackKeyForSlot(slot) || "");
-                    return;
-                }
-                root.walletAvailable = true;
-                walletCall("readPassword", [new DBus.int32(handle), "PlasmaLLM", slot, "PlasmaLLM"],
-                    function(password) {
-                        closeHandle(handle);
-                        if (password && password.length > 0)
-                            callback(null, String(password).replace(/^\s+|\s+$/g, ""));
-                        else
-                            callback(null, fallbackKeyForSlot(slot) || "");
-                    },
-                    function(err) {
-                        closeHandle(handle);
-                        callback(null, fallbackKeyForSlot(slot) || "");
-                    }
-                );
-            },
-            function(err) {
-                console.warn("PlasmaLLM: STT KWallet open error:", err);
-                callback(null, fallbackKeyForSlot(slot) || "");
+        var provider = Plasmoid.configuration.sttProviderName || "";
+        var endpoint = Plasmoid.configuration.sttApiEndpoint || "";
+        var slot = Api.sttKeySlot(provider, endpoint);
+        Wallet.readKey(DBus, slot, Api.sttLegacyKeySlots(provider, endpoint),
+            fallbackMap(), "",
+            function(res) {
+                if (res && res.available)
+                    root.walletAvailable = true;
+                callback(null, (res && res.key) || fallbackKeyForSlot(slot) || "");
             }
         );
     }
@@ -355,11 +330,13 @@ PlasmoidItem {
                 apiKey: root.apiKey || "",
                 model: Plasmoid.configuration.modelName,
                 apiType: root.effectiveApiType,
+                geminiApiVariant: Plasmoid.configuration.geminiApiVariant,
                 geminiAuthMethod: Plasmoid.configuration.geminiAuthMethod,
                 geminiProjectId: Plasmoid.configuration.geminiProjectId,
                 geminiLocation: Plasmoid.configuration.geminiLocation,
                 geminiVertexAuthType: Plasmoid.configuration.geminiVertexAuthType,
-                usesResponsesAPI: Plasmoid.configuration.usesResponsesAPI
+                usesResponsesAPI: Plasmoid.configuration.usesResponsesAPI,
+                providerName: Plasmoid.configuration.providerName
             });
             return;
         }
@@ -379,11 +356,13 @@ PlasmoidItem {
                 apiKey: root.apiKey || "",
                 model: Plasmoid.configuration.modelName,
                 apiType: root.effectiveApiType,
+                geminiApiVariant: Plasmoid.configuration.geminiApiVariant,
                 geminiAuthMethod: Plasmoid.configuration.geminiAuthMethod,
                 geminiProjectId: Plasmoid.configuration.geminiProjectId,
                 geminiLocation: Plasmoid.configuration.geminiLocation,
                 geminiVertexAuthType: Plasmoid.configuration.geminiVertexAuthType,
-                usesResponsesAPI: Plasmoid.configuration.usesResponsesAPI
+                usesResponsesAPI: Plasmoid.configuration.usesResponsesAPI,
+                providerName: Plasmoid.configuration.providerName
             });
             return;
         }
@@ -395,76 +374,35 @@ PlasmoidItem {
             targetProf.apiEndpoint || "",
             targetProf.geminiAuthMethod || ""
         );
+        var extras = Api.legacyKeySlots(
+            targetProf.id,
+            targetProf.apiType || "openai",
+            targetProf.providerName || "",
+            targetProf.apiEndpoint || "",
+            targetProf.geminiAuthMethod || ""
+        );
 
-        function closeHandle(handle) {
-            walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
+        function done(key) {
+            callback({
+                endpoint: targetProf.apiEndpoint,
+                apiKey: key || "",
+                model: targetProf.modelName,
+                apiType: targetProf.apiType || "openai",
+                geminiApiVariant: targetProf.geminiApiVariant,
+                geminiAuthMethod: targetProf.geminiAuthMethod,
+                geminiProjectId: targetProf.geminiProjectId,
+                geminiLocation: targetProf.geminiLocation,
+                geminiVertexAuthType: targetProf.geminiVertexAuthType,
+                usesResponsesAPI: targetProf.usesResponsesAPI,
+                providerName: targetProf.providerName
+            });
         }
 
-        walletCall("open", ["kdewallet", new DBus.int64(0), "PlasmaLLM"],
-            function(handle) {
-                if (handle < 0) {
-                    callback({
-                        endpoint: targetProf.apiEndpoint,
-                        apiKey: fallbackKeyForSlot(slot) || "",
-                        model: targetProf.modelName,
-                        apiType: targetProf.apiType || "openai",
-                        geminiAuthMethod: targetProf.geminiAuthMethod,
-                        geminiProjectId: targetProf.geminiProjectId,
-                        geminiLocation: targetProf.geminiLocation,
-                        geminiVertexAuthType: targetProf.geminiVertexAuthType,
-                        usesResponsesAPI: targetProf.usesResponsesAPI
-                    });
-                    return;
-                }
+        Wallet.readKey(DBus, slot, extras, fallbackMap(), "", function(res) {
+            if (res && res.available)
                 root.walletAvailable = true;
-                walletCall("readPassword", [new DBus.int32(handle), "PlasmaLLM", slot, "PlasmaLLM"],
-                    function(password) {
-                        closeHandle(handle);
-                        var key = (password && password.length > 0)
-                            ? String(password).replace(/^\s+|\s+$/g, "")
-                            : (fallbackKeyForSlot(slot) || "");
-                        callback({
-                            endpoint: targetProf.apiEndpoint,
-                            apiKey: key,
-                            model: targetProf.modelName,
-                            apiType: targetProf.apiType || "openai",
-                            geminiAuthMethod: targetProf.geminiAuthMethod,
-                            geminiProjectId: targetProf.geminiProjectId,
-                            geminiLocation: targetProf.geminiLocation,
-                            geminiVertexAuthType: targetProf.geminiVertexAuthType,
-                            usesResponsesAPI: targetProf.usesResponsesAPI
-                        });
-                    },
-                    function(err) {
-                        closeHandle(handle);
-                        callback({
-                            endpoint: targetProf.apiEndpoint,
-                            apiKey: fallbackKeyForSlot(slot) || "",
-                            model: targetProf.modelName,
-                            apiType: targetProf.apiType || "openai",
-                            geminiAuthMethod: targetProf.geminiAuthMethod,
-                            geminiProjectId: targetProf.geminiProjectId,
-                            geminiLocation: targetProf.geminiLocation,
-                            geminiVertexAuthType: targetProf.geminiVertexAuthType,
-                            usesResponsesAPI: targetProf.usesResponsesAPI
-                        });
-                    }
-                );
-            },
-            function(err) {
-                callback({
-                    endpoint: targetProf.apiEndpoint,
-                    apiKey: fallbackKeyForSlot(slot) || "",
-                    model: targetProf.modelName,
-                    apiType: targetProf.apiType || "openai",
-                    geminiAuthMethod: targetProf.geminiAuthMethod,
-                    geminiProjectId: targetProf.geminiProjectId,
-                    geminiLocation: targetProf.geminiLocation,
-                    geminiVertexAuthType: targetProf.geminiVertexAuthType,
-                    usesResponsesAPI: targetProf.usesResponsesAPI
-                });
-            }
-        );
+            done((res && res.key) || fallbackKeyForSlot(slot) || "");
+        });
     }
 
     /**
@@ -625,15 +563,24 @@ PlasmoidItem {
             }
 
             ContextCompactor.compactHistory({
-                apiType: compConfig.apiType,
+                apiType: Api.resolvedApiType(
+                    compConfig.apiType,
+                    compConfig.geminiApiVariant,
+                    compConfig.geminiAuthMethod,
+                    compConfig.geminiVertexAuthType),
                 endpoint: compConfig.endpoint,
                 apiKey: compConfig.apiKey,
                 model: compConfig.model,
+                geminiApiVariant: Api.clampGeminiApiVariant(
+                    compConfig.geminiApiVariant,
+                    compConfig.geminiAuthMethod,
+                    compConfig.geminiVertexAuthType),
                 geminiAuthMethod: compConfig.geminiAuthMethod,
                 geminiProjectId: compConfig.geminiProjectId,
                 geminiLocation: compConfig.geminiLocation,
                 geminiVertexAuthType: compConfig.geminiVertexAuthType,
                 usesResponsesAPI: compConfig.usesResponsesAPI,
+                providerName: compConfig.providerName,
                 transcript: transcript,
                 previousSummary: prevSummary,
                 instructions: Plasmoid.configuration.compactionInstructions
@@ -782,18 +729,20 @@ PlasmoidItem {
         var absPath = String(filePath);
         var fmt = format || Stt.formatFromPath(absPath);
         var safePath = absPath.replace(/'/g, "'\\''");
+        var cli = Stt.isCliTransport(Plasmoid.configuration);
         // Reject tiny/empty clips before paying for STT (WAV header alone is ~44 bytes;
-        // genuine speech is usually many KB). Also measure duration via soxi/ffprobe when present.
+        // genuine speech is usually many KB).
         var cmd = "f='" + safePath + "'; "
             + "if [ ! -f \"$f\" ]; then echo 'ERR empty'; exit 1; fi; "
             + "sz=$(wc -c < \"$f\" | tr -d ' '); "
             + "if [ \"${sz:-0}\" -lt 2048 ]; then echo 'ERR tiny'; exit 2; fi; "
-            + "base64 -w0 \"$f\"";
+            + (cli ? "echo OK" : "base64 -w0 \"$f\"");
 
         pendingSttReads[cmd] = {
             filePath: absPath,
             format: fmt,
-            gen: myGen
+            gen: myGen,
+            cli: cli
         };
         sttFileReader.connectSource(cmd);
     }
@@ -856,9 +805,74 @@ PlasmoidItem {
         });
     }
 
+    function finishSttWithCli(filePath, format, gen) {
+        if (gen !== root._sttGen) {
+            enqueueVoiceCleanup(filePath);
+            return;
+        }
+
+        Stt.transcribe({
+            config: Plasmoid.configuration,
+            filePath: filePath,
+            format: format || "wav",
+            runCommand: function(cmd, cb) {
+                if (gen !== root._sttGen) {
+                    cb(i18n("Transcription canceled"), null);
+                    return;
+                }
+                pendingWhisperRuns[cmd] = { cb: cb, gen: gen, filePath: filePath };
+                whisperExec.connectSource(cmd);
+            },
+            callback: function(sttErr, result) {
+                if (gen !== root._sttGen) {
+                    enqueueVoiceCleanup(filePath);
+                    return;
+                }
+                isTranscribing = false;
+                sttStatusText = "";
+                enqueueVoiceCleanup(filePath);
+
+                if (sttErr) {
+                    showSttNotice(sttErr);
+                    return;
+                }
+                var text = (result && result.text) ? String(result.text).replace(/^\s+|\s+$/g, "") : "";
+                if (!text.length) {
+                    showSttNotice(i18n("No speech detected."));
+                    return;
+                }
+                if (!root.sendMessage(text, [], { fromVoice: true })) {
+                    showSttNotice(i18n("Could not send transcribed message."));
+                }
+            }
+        });
+    }
+
     property var pendingSttReads: ({})
+    property var pendingWhisperRuns: ({})
     property string _shellRecordPid: ""
     property string _shellRecordPath: ""
+
+    P5Support.DataSource {
+        id: whisperExec
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            var exitCode = data["exit code"];
+            if (exitCode === undefined)
+                return;
+            var pending = pendingWhisperRuns[source];
+            delete pendingWhisperRuns[source];
+            disconnectSource(source);
+            if (!pending || typeof pending.cb !== "function")
+                return;
+            pending.cb(null, {
+                stdout: data.stdout || "",
+                stderr: data.stderr || "",
+                exitCode: exitCode
+            });
+        }
+    }
 
     P5Support.DataSource {
         id: sttFileReader
@@ -882,7 +896,10 @@ PlasmoidItem {
                     root.showSttNotice(i18n("Failed to read recorded audio."));
                 return;
             }
-            root.finishSttWithBase64(stdout, info.format, info.filePath, info.gen);
+            if (info.cli)
+                root.finishSttWithCli(info.filePath, info.format, info.gen);
+            else
+                root.finishSttWithBase64(stdout, info.format, info.filePath, info.gen);
         }
     }
 
@@ -1011,7 +1028,11 @@ PlasmoidItem {
         }
     }
 
-    readonly property string effectiveApiType: (Plasmoid.configuration.apiType === "gemini" && Plasmoid.configuration.geminiApiVariant === "interactions") ? "gemini_interactions" : Plasmoid.configuration.apiType
+    readonly property string effectiveApiType: Api.resolvedApiType(
+        Plasmoid.configuration.apiType,
+        Plasmoid.configuration.geminiApiVariant,
+        Plasmoid.configuration.geminiAuthMethod,
+        Plasmoid.configuration.geminiVertexAuthType)
 
     function currentTimestamp() {
         return new Date().toLocaleTimeString(Qt.locale(), Locale.ShortFormat);
@@ -1049,6 +1070,7 @@ PlasmoidItem {
             }
         }
         displayMessages.append(msg);
+        root.chatContentChanged();
         return displayMessages.count - 1;
     }
 
@@ -1061,6 +1083,7 @@ PlasmoidItem {
                 displayMessages.setProperty(index, p, extraProps[p]);
             }
         }
+        root.chatContentChanged();
     }
 
     function findChatIndexForDisplayIndex(displayIndex) {
@@ -1193,12 +1216,26 @@ PlasmoidItem {
     // Commands currently in-flight as system info gather (populated by regatherSysInfo)
     property var pendingSysInfoCommands: ({})
     property var stopCommands: ([])
-    property var statusCheckCommands: ([])
     property int commandRunStateTick: 0
     property var savedScreenshotPaths: ({})
 
     property var chunkedSaveQueue: []
     property bool isChunkSaving: false
+
+    // Skill files: parsed <name>/SKILL.md records from the discovery scan
+    // (see skills.js) plus the names activated via the skill tool this session.
+    // Active bodies are re-injected in full on every prompt rebuild so context
+    // compaction and message capping can never drop them.
+    property var loadedSkills: []
+    property var activeSkills: []
+    property var pendingSkillScanCommands: ({})
+    property int lastSkillsScanMs: 0
+
+    // Persistent memory: short phrases saved via the edit_memory tool (or the
+    // settings editor) that are injected into every system prompt rebuild.
+    // Backing store is the "memoryPhrases" KConfig key (JSON array string);
+    // see memory.js for parsing, matching, and rendering rules.
+    property var memoryPhrases: []
 
     function enqueueChunkSave(cmd) {
         chunkedSaveQueue.push(cmd);
@@ -1339,13 +1376,7 @@ PlasmoidItem {
                 isLoading = false;
                 if (streamingMessageIndex >= 0) displayMessages.remove(streamingMessageIndex);
                 streamingMessageIndex = -1;
-                displayMessages.append({
-                    role: "error",
-                    content: i18n("Failed to fetch gcloud token (exit %1): %2. Please ensure gcloud is installed and authenticated.", exitCode, data["stderr"] || ""),
-
-                    shared: false,
-                    timestamp: currentTimestamp(),
-                });
+                root.appendDisplayMessage("error", i18n("Failed to fetch gcloud token (exit %1): %2. Please ensure gcloud is installed and authenticated.", exitCode, data["stderr"] || ""), { shared: false });
                 pendingRequest = null;
             }
         }
@@ -1364,6 +1395,10 @@ PlasmoidItem {
             if (pendingSysInfoCommands[source]) {
                 delete pendingSysInfoCommands[source];
                 handleSystemInfo(source, stdout);
+                disconnectSource(source);
+            } else if (pendingSkillScanCommands[source]) {
+                delete pendingSkillScanCommands[source];
+                handleSkillsScan(stdout);
                 disconnectSource(source);
             } else if (terminalCommands.indexOf(source) !== -1) {
                 // Terminal launches — suppress output bubble
@@ -1429,10 +1464,6 @@ PlasmoidItem {
                 // Stop commands from the multiplexer
                 stopCommands.splice(stopCommands.indexOf(source), 1);
                 disconnectSource(source);
-            } else if (statusCheckCommands.indexOf(source) !== -1) {
-                statusCheckCommands.splice(statusCheckCommands.indexOf(source), 1);
-                root.sessionActive = (exitCode === 0);
-                disconnectSource(source);
             } else {
                 if (stdout.length > 0 || stderr.length > 0) {
                     console.warn("PlasmaLLM: Unexpected output from source [" + source + "]: " + stdout + (stderr ? " stderr: " + stderr : ""));
@@ -1466,6 +1497,9 @@ PlasmoidItem {
                 break;
             case "realpath $HOME":
                 sysInfo.userHome = output;
+                break;
+            case "echo $HOME":
+                sysInfo.homeEnv = output;
                 break;
             case "echo $SHELL":
                 sysInfo.shell = output;
@@ -1537,6 +1571,7 @@ PlasmoidItem {
         sysInfoPending--;
         if (sysInfoPending === 0) {
             initSystemPrompt();
+            loadSkills(true);
             if (historyFilesModel.count === 0 && Plasmoid.configuration.chatSaveFormat === "jsonl" && Plasmoid.configuration.saveChatHistory) {
                 fetchHistoryList();
             }
@@ -1580,14 +1615,27 @@ PlasmoidItem {
             toolsNotifyAutoRun: Plasmoid.configuration.toolsNotifyAutoRun,
             toolsOpenUrlEnabled: Plasmoid.configuration.toolsOpenUrlEnabled,
             toolsOpenUrlAutoRun: Plasmoid.configuration.toolsOpenUrlAutoRun,
+            toolsEditMemoryEnabled: Plasmoid.configuration.toolsEditMemoryEnabled,
+            toolsEditMemoryAutoRun: Plasmoid.configuration.toolsEditMemoryAutoRun,
+            toolsSkillEnabled: Plasmoid.configuration.toolsSkillEnabled,
+            toolsSkillAutoRun: Plasmoid.configuration.toolsSkillAutoRun,
+            toolsRunSkillScriptEnabled: Plasmoid.configuration.toolsRunSkillScriptEnabled,
             toolsPathWhitelist: Plasmoid.configuration.toolsPathWhitelist,
             toolsReadMaxBytes: Plasmoid.configuration.toolsReadMaxBytes,
             toolsWriteMaxBytes: Plasmoid.configuration.toolsWriteMaxBytes,
             toolsHttpMaxBytes: Plasmoid.configuration.toolsHttpMaxBytes,
             toolsInstructions: Plasmoid.configuration.toolsInstructions,
+            toolsCollapseResults: Plasmoid.configuration.toolsCollapseResults,
             localizeSystemPrompt: Plasmoid.configuration.localizeSystemPrompt,
             customTools: Plasmoid.configuration.customTools,
-            compactionEnabled: Plasmoid.configuration.compactionEnabled
+            compactionEnabled: Plasmoid.configuration.compactionEnabled,
+            skillsEnabled: Plasmoid.configuration.skillsEnabled,
+            skillsDisabledList: Plasmoid.configuration.skillsDisabledList,
+            skillsScriptsAutoRun: Plasmoid.configuration.skillsScriptsAutoRun,
+            userHome: sysInfo.userHome || "",
+            loadedSkills: root.loadedSkills,
+            activeSkills: root.activeSkills,
+            memoryPhrases: root.memoryPhrases
         };
     }
 
@@ -1682,6 +1730,20 @@ PlasmoidItem {
         initSystemPrompt();
     }
 
+    // Upstream's flat KConfig phrase list. Its tool (`edit_memory`) is not
+    // registered — memory is served by remember/recall/forget over
+    // memoryStore.js — so these are inert. Kept unmodified so upstream's
+    // memory.js and its callers keep fast-forwarding on future merges.
+    function loadMemoryPhrases() {
+        root.memoryPhrases = Memory.parseStored(Plasmoid.configuration.memoryPhrases);
+    }
+
+    function setMemoryPhrases(list) {
+        root.memoryPhrases = Memory.parseStored(list);
+        Plasmoid.configuration.memoryPhrases = Memory.serialize(root.memoryPhrases);
+        if (systemPromptReady) initSystemPrompt();
+    }
+
     function initSystemPrompt() {
         var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
             i18n: i18n,
@@ -1713,6 +1775,7 @@ PlasmoidItem {
         if (Plasmoid.configuration.sysInfoDesktop)  cmds.push("echo $XDG_CURRENT_DESKTOP");
         if (Plasmoid.configuration.sysInfoUser)     cmds.push("whoami");
         cmds.push("realpath $HOME");
+        cmds.push("echo $HOME");
         if (Plasmoid.configuration.sysInfoCPU)      cmds.push("lscpu");
         if (Plasmoid.configuration.sysInfoMemory)   cmds.push("free -h");
         if (Plasmoid.configuration.sysInfoGPU)      cmds.push("bash -c \"lspci -nn | grep -iE 'vga|3d|display'\"");
@@ -1738,6 +1801,97 @@ PlasmoidItem {
         }
     }
 
+    // ---- Skill files -------------------------------------------------------
+    // Directories are scanned via one delimited shell command per load; the
+    // output is parsed by skills.js into root.loadedSkills and mirrored (no
+    // bodies) into skillsCache so the settings dialog can enumerate them.
+
+    function bundledSkillsDir() {
+        return Skills.toLocalPath(Qt.resolvedUrl("../skills"));
+    }
+
+    function skillsRoots() {
+        var home = sysInfo.userHome || "";
+        var dataHome = sysInfo.xdgDataHome || (home ? home + "/.local/share" : "");
+        var roots = [];
+        // User files win on name conflicts; bundled ships with the plasmoid
+        // and sits above opt-in Claude/agents roots so their create-skill
+        // (wrong paths) cannot hide ours.
+        if (dataHome) roots.push({ dir: dataHome + "/plasmallm/skills", source: "plasmallm" });
+        var bundled = bundledSkillsDir();
+        if (bundled) roots.push({ dir: bundled, source: "bundled" });
+        if (home) {
+            if (Plasmoid.configuration.skillsScanClaude) {
+                roots.push({ dir: home + "/.claude/skills", source: "claude" });
+            }
+            if (Plasmoid.configuration.skillsScanAgents) {
+                roots.push({ dir: home + "/.agents/skills", source: "agents" });
+            }
+        }
+        if (Plasmoid.configuration.skillsExtraDirs) {
+            try {
+                var extra = JSON.parse(Plasmoid.configuration.skillsExtraDirs);
+                if (Array.isArray(extra)) {
+                    for (var i = 0; i < extra.length; i++) {
+                        var d = String(extra[i] || "").trim();
+                        if (d.length > 0) roots.push({ dir: d, source: "custom" });
+                    }
+                }
+            } catch (e) {}
+        }
+        return roots;
+    }
+
+    function loadSkills(force, prefixCmd) {
+        var roots = skillsRoots();
+        if (roots.length === 0) return;
+        var now = Date.now();
+        if (!force && !prefixCmd && lastSkillsScanMs && (now - lastSkillsScanMs) < 5000) return;
+        lastSkillsScanMs = now;
+        var cmd = Skills.buildScanCommand(roots, prefixCmd);
+        pendingSkillScanCommands[cmd] = true;
+        executable.connectSource(cmd);
+    }
+
+    function handleSkillsScan(stdout) {
+        // A failed command (bad syntax, missing shell, etc.) yields empty
+        // stdout — keep the previous scan results rather than wiping them.
+        if (!stdout || String(stdout).indexOf("===PLASMALLM_SKILL_END") === -1) {
+            console.warn("PlasmaLLM: skill scan produced no output; keeping previous skill list");
+            return;
+        }
+        root.loadedSkills = Skills.parseScanOutput(stdout, skillsRoots());
+        Plasmoid.configuration.skillsCache = Skills.toCacheJson(root.loadedSkills);
+        if (systemPromptReady) initSystemPrompt();
+    }
+
+    function skillStatusText() {
+        if (root.loadedSkills.length === 0) {
+            return i18n("No skills found. Drop folders containing a SKILL.md into ~/.local/share/plasmallm/skills/ (configure extra directories in Settings → Skills).");
+        }
+        var disabled = Skills.parseDisabledList(Plasmoid.configuration.skillsDisabledList);
+        var enabledCount = Skills.filterEnabledSkills(root.loadedSkills, Plasmoid.configuration.skillsDisabledList).length;
+        var lines = [];
+        for (var i = 0; i < root.loadedSkills.length; i++) {
+            var s = root.loadedSkills[i];
+            if (!s.valid) {
+                lines.push("- **" + s.dirName + "** — " + i18n("invalid:") + " " + s.error);
+                continue;
+            }
+            var isDisabled = false;
+            for (var d = 0; d < disabled.length; d++) {
+                if (disabled[d] === s.name) { isDisabled = true; break; }
+            }
+            var active = root.activeSkills.indexOf(s.name) !== -1;
+            var tags = s.source;
+            if (isDisabled) tags += ", " + i18n("disabled");
+            if (active) tags += ", " + i18n("loaded");
+            lines.push("- **" + s.name + "** (" + tags + ") — " + s.description);
+        }
+        return i18n("Available skills (%1 enabled):", enabledCount) + "\n" + lines.join("\n") +
+            "\n\n" + i18n("Enable or disable individual skills in Settings → Skills.");
+    }
+
     function clearChat() {
         if (activeRequest) {
             if (activeRequest.xhr) activeRequest.xhr.abort();
@@ -1757,6 +1911,7 @@ PlasmoidItem {
         sessionAutoMode = false;
         sessionFullAutoMode = false;
         root.pendingToolCalls = [];
+        root.activeSkills = [];
         root.activeCompaction = {
             summary: "",
             compactedUpToMsgId: "",
@@ -1997,10 +2152,11 @@ PlasmoidItem {
         var version = (meta && meta.version) ? meta.version : 1;
 
         if (version === 1) {
-            LegacyChatLoader.loadV1(lines, chatMessages, displayMessages, fileReader, pendingFileReads);
+            LegacyChatLoader.loadV1(lines, chatMessages, displayMessages, fileReader, pendingFileReads, root.appendDisplayMessage);
             return;
         }
 
+        var apiAttachmentPaths = {};
         for (var i = 0; i < lines.length; i++) {
             if (!lines[i].trim()) continue;
             try {
@@ -2012,6 +2168,18 @@ PlasmoidItem {
                         lastCompactedTimestamp: data.lastCompactedTimestamp || ""
                     };
                 } else if (data._type === "api") {
+                    // Record attachment paths keyed by api msg id so display
+                    // lines saved before non-image attachments were shown in
+                    // the UI can be backfilled below.
+                    if (data.attachments_json && data.attachments_json.length > 0) {
+                        try {
+                            var apiAtts = JSON.parse(data.attachments_json);
+                            var apiPaths = apiAtts.map(function(a) { return a.filePath || ""; }).filter(function(p) { return !!p; });
+                            if (apiPaths.length > 0 && (data.id || data.msgId)) {
+                                apiAttachmentPaths[data.id || data.msgId] = apiPaths.join("\n");
+                            }
+                        } catch(e) {}
+                    }
                     chatMessages.append({
                         msgId: data.msgId || data.id || nextMsgId("c"),
                         turnId: data.turnId || "",
@@ -2044,16 +2212,18 @@ PlasmoidItem {
                         } catch(e) {}
                     }
                 } else if (data._type === "display") {
-                    displayMessages.append({
+                    var restoredAttachmentsStr = data.attachmentsStr || "";
+                    if (restoredAttachmentsStr.length === 0 && data.apiMsgId && apiAttachmentPaths[data.apiMsgId]) {
+                        restoredAttachmentsStr = apiAttachmentPaths[data.apiMsgId];
+                    }
+                    root.appendDisplayMessage(data.role, data.content, {
                         msgId: data.msgId || data.id || nextMsgId("d"),
                         turnId: data.turnId || "",
                         apiMsgId: data.apiMsgId || "",
-                        role: data.role,
-                        content: data.content,
                         thinking: data.thinking || "",
                         shared: data.shared || false,
                         timestamp: data.timestamp || "",
-                        attachmentsStr: data.attachmentsStr || "",
+                        attachmentsStr: restoredAttachmentsStr,
                         fromVoice: !!data.fromVoice,
                         toolTitle: data.toolTitle || "",
                         toolIcon: data.toolIcon || "",
@@ -2080,41 +2250,6 @@ PlasmoidItem {
         var cmd = "cat '" + filePath.replace(/'/g, "'\\''") + "'";
         pendingHistoryLoads[cmd] = filePath;
         executable.connectSource(cmd);
-    }
-
-    function walletCall(member, args, resolve, reject) {
-        var reply = DBus.SessionBus.asyncCall({
-            service: "org.kde.kwalletd6",
-            path: "/modules/kwalletd6",
-            iface: "org.kde.KWallet",
-            member: member,
-            arguments: args
-        });
-        reply.finished.connect(function() {
-            if (reply.isError) {
-                if (reject) reject(reply.error);
-            } else {
-                var val = reply.value;
-                if (val !== null && val !== undefined && val.hasOwnProperty("value")) val = val.value;
-                if (resolve) resolve(val);
-            }
-        });
-    }
-
-    function ensureWalletFolder(handle, callback) {
-        walletCall("hasFolder", [new DBus.int32(handle), "PlasmaLLM", "PlasmaLLM"],
-            function(exists) {
-                if (exists) {
-                    callback(true);
-                } else {
-                    walletCall("createFolder", [new DBus.int32(handle), "PlasmaLLM", "PlasmaLLM"],
-                        function(created) { callback(created); },
-                        function(err) { callback(false); }
-                    );
-                }
-            },
-            function(err) { callback(false); }
-        );
     }
 
     function currentApiKeySlot() {
@@ -2148,46 +2283,20 @@ PlasmoidItem {
         );
     }
 
-    function fallbackKeyForSlot(slot) {
-        var raw = Plasmoid.configuration.apiKeysFallback;
-        var m = {};
-        if (raw && raw.length > 0) {
-            try {
-                m = JSON.parse(raw) || {};
-            } catch(e) {}
-        }
-        if (m && m.hasOwnProperty(slot) && m[slot]) return m[slot];
+    function fallbackMap() {
+        return WalletCore.parseFallbackMap(Plasmoid.configuration.apiKeysFallback);
+    }
 
-        var legacies = Api.legacyKeySlots(
+    function fallbackKeyForSlot(slot) {
+        var extras = Api.legacyKeySlots(
             Plasmoid.configuration.activeProfileId,
             Plasmoid.configuration.apiType,
             Plasmoid.configuration.providerName,
             Plasmoid.configuration.apiEndpoint,
             Plasmoid.configuration.geminiAuthMethod
         );
-        for (var i = 0; i < legacies.length; i++) {
-            if (legacies[i] === slot) continue;
-            if (m && m.hasOwnProperty(legacies[i]) && m[legacies[i]])
-                return m[legacies[i]];
-        }
-
-        return Plasmoid.configuration.apiKey || "";
-    }
-
-    function walletWriteKey(handle, slot, key, onDone) {
-        ensureWalletFolder(handle, function(ok) {
-            if (!ok) {
-                onDone(false);
-                return;
-            }
-            walletCall("writePassword", [new DBus.int32(handle), "PlasmaLLM", slot, key, "PlasmaLLM"],
-                function(result) { onDone(result === 0); },
-                function(err) {
-                    console.warn("PlasmaLLM: wallet writePassword error: " + err);
-                    onDone(false);
-                }
-            );
-        });
+        return WalletCore.lookupFallback(fallbackMap(), [slot].concat(extras),
+            Plasmoid.configuration.apiKey);
     }
 
     // Banner after one-time key-slot migration (not a chat bubble).
@@ -2199,10 +2308,10 @@ PlasmoidItem {
         showApiKeyMigrationNotice = false;
     }
 
-    // One-time: pre-update wallet names → v1/chat|search (KEY_SLOT_SCHEME_VERSION).
-    // Does not delete legacy entries. onDone(ran) when scheme version was bumped.
+    // Copy pre-v2 wallet names onto v2| slots. Does not delete legacy entries.
+    // onDone(ran) is true only when the watermark was actually bumped.
     function migrateApiKeySlotScheme(onDone) {
-        var targetVer = Api.KEY_SLOT_SCHEME_VERSION || 2;
+        var targetVer = Api.KEY_SLOT_SCHEME_VERSION || 3;
         if ((Plasmoid.configuration.apiKeySlotSchemeVersion || 0) >= targetVer) {
             if (onDone) onDone(false);
             return;
@@ -2210,289 +2319,122 @@ PlasmoidItem {
 
         var profiles = Profiles.loadProfiles(Plasmoid.configuration) || [];
 
-        function finish(didWork) {
+        function applyFallbackPairs(pairs) {
+            var result = WalletCore.applyFallbackCopies(fallbackMap(), pairs);
+            if (result.changed)
+                Plasmoid.configuration.apiKeysFallback = WalletCore.stringifyFallbackMap(result.map);
+            return result.changed;
+        }
+
+        function finishSuccess(didWork) {
             Plasmoid.configuration.apiKeySlotSchemeVersion = targetVer;
             if (didWork)
                 Plasmoid.configuration.apiKeyVersion = (Plasmoid.configuration.apiKeyVersion || 0) + 1;
-            if (onDone) onDone(true);
+            if (onDone) onDone(!!didWork);
         }
 
-        function destForParsedProvider(profileId, parsed) {
-            return Api.chatKeySlot(
-                profileId,
-                parsed.apiType,
-                parsed.providerName,
-                parsed.endpoint || "",
-                parsed.geminiAuthMethod
-            );
-        }
+        Wallet.listEntries(DBus, function(listRes) {
+            var entries = (listRes && listRes.entries) ? listRes.entries : [];
+            var pairs = WalletCore.buildMigrationCopies({
+                profiles: profiles,
+                activeProfileId: Plasmoid.configuration.activeProfileId,
+                entries: entries,
+                sttProviderName: Plasmoid.configuration.sttProviderName,
+                sttApiEndpoint: Plasmoid.configuration.sttApiEndpoint
+            });
+            var fallbackChanged = applyFallbackPairs(pairs);
 
-        function migrateFallbackMap() {
-            var raw = Plasmoid.configuration.apiKeysFallback;
-            if (!raw || raw.length === 0) return false;
-            var m;
-            try { m = JSON.parse(raw); } catch (e) { return false; }
-            if (!m || typeof m !== "object") return false;
-            var changed = false;
-
-            function ensureCopy(fromSlot, toSlot) {
-                if (!fromSlot || !toSlot || fromSlot === toSlot) return;
-                if (!m[fromSlot] || String(m[fromSlot]).length === 0) return;
-                if (m[toSlot] && String(m[toSlot]).length > 0) return;
-                m[toSlot] = m[fromSlot];
-                changed = true;
+            if (listRes && listRes.openFailed) {
+                console.warn("PlasmaLLM: wallet open for key migration failed; will retry next start");
+                if (onDone) onDone(false);
+                return;
             }
 
-            var names = Object.keys(m);
-            for (var ni = 0; ni < names.length; ni++) {
-                var n = names[ni];
-                var parsed = Api.parseProviderOnlySlot(n);
-                if (parsed) {
-                    for (var pi = 0; pi < profiles.length; pi++)
-                        ensureCopy(n, destForParsedProvider(profiles[pi].id, parsed));
-                    continue;
-                }
-                // Search legacy → v1/search/_/<name>
-                if (Api.LEGACY_SEARCH_KEY_MAP && Api.LEGACY_SEARCH_KEY_MAP[n])
-                    ensureCopy(n, Api.searchKeySlot(Api.LEGACY_SEARCH_KEY_MAP[n]));
-            }
-            for (var pi2 = 0; pi2 < profiles.length; pi2++) {
-                var p = profiles[pi2];
-                ensureCopy(Api.profileKeySlot(p.id),
-                    Api.currentKeySlot(p.id, p.apiType, p.providerName, p.apiEndpoint, p.geminiAuthMethod));
-            }
-            if (m["apiKey"] && profiles.length > 0) {
-                var act = Profiles.getActive(profiles, Plasmoid.configuration.activeProfileId) || profiles[0];
-                ensureCopy("apiKey", Api.currentKeySlot(act.id, act.apiType, act.providerName,
-                    act.apiEndpoint, act.geminiAuthMethod));
-            }
-            if (changed)
-                Plasmoid.configuration.apiKeysFallback = JSON.stringify(m);
-            return changed;
-        }
-
-        walletCall("open", ["kdewallet", new DBus.int64(0), "PlasmaLLM"],
-            function(handle) {
-                if (handle < 0) {
-                    finish(migrateFallbackMap());
+            root.walletAvailable = true;
+            Wallet.copyMissing(DBus, pairs, function(copyRes) {
+                if (copyRes && copyRes.openFailed) {
+                    console.warn("PlasmaLLM: wallet copy for key migration failed; will retry next start");
+                    if (onDone) onDone(false);
                     return;
                 }
-                root.walletAvailable = true;
-                ensureWalletFolder(handle, function(ok) {
-                    if (!ok) {
-                        walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-                        finish(migrateFallbackMap());
-                        return;
-                    }
+                finishSuccess((copyRes && copyRes.writes > 0) || fallbackChanged);
+            });
+        });
+    }
 
-                    var pending = 0;
-                    var writes = 0;
-                    var fallbackChanged = migrateFallbackMap();
+    // opts.keepPrevious: do not clear the in-memory key first (retries + Gemini
+    // platform switches where the same key may still apply via sibling slots).
+    function loadApiKeyFromWallet(gen, opts) {
+        opts = opts || {};
+        var myGen = (gen !== undefined && gen !== null) ? gen : root._configGen;
+        var slot = currentApiKeySlot();
+        var previousKey = root.apiKey || "";
+        if (!opts.keepPrevious)
+            root.apiKey = "";
+        function isCurrent() {
+            return myGen === root._configGen && slot === currentApiKeySlot();
+        }
 
-                    function checkDone() {
-                        if (pending > 0) return;
-                        walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-                        finish(writes > 0 || fallbackChanged);
-                    }
-
-                    function readThenMaybeWrite(fromSlot, toSlot) {
-                        if (!fromSlot || !toSlot || fromSlot === toSlot) return;
-                        pending++;
-                        walletCall("readPassword", [new DBus.int32(handle), "PlasmaLLM", fromSlot, "PlasmaLLM"],
-                            function(password) {
-                                if (!password || password.length === 0) {
-                                    pending--;
-                                    checkDone();
-                                    return;
-                                }
-                                walletCall("readPassword", [new DBus.int32(handle), "PlasmaLLM", toSlot, "PlasmaLLM"],
-                                    function(existing) {
-                                        if (existing && existing.length > 0) {
-                                            pending--;
-                                            checkDone();
-                                            return;
-                                        }
-                                        walletWriteKey(handle, toSlot, password, function(success) {
-                                            if (success) writes++;
-                                            pending--;
-                                            checkDone();
-                                        });
-                                    },
-                                    function() {
-                                        walletWriteKey(handle, toSlot, password, function(success) {
-                                            if (success) writes++;
-                                            pending--;
-                                            checkDone();
-                                        });
-                                    }
-                                );
-                            },
-                            function() {
-                                pending--;
-                                checkDone();
-                            }
-                        );
-                    }
-
-                    function scheduleCopies(list) {
-                        list = list || [];
-                        // 1) Provider-only chat → each profile's v1/chat slot
-                        for (var i = 0; i < list.length; i++) {
-                            var entry = list[i];
-                            var prov = Api.parseProviderOnlySlot(entry);
-                            if (prov) {
-                                for (var j = 0; j < profiles.length; j++)
-                                    readThenMaybeWrite(entry, destForParsedProvider(profiles[j].id, prov));
-                                continue;
-                            }
-                            // 2) Search legacy names
-                            if (Api.LEGACY_SEARCH_KEY_MAP && Api.LEGACY_SEARCH_KEY_MAP[entry])
-                                readThenMaybeWrite(entry, Api.searchKeySlot(Api.LEGACY_SEARCH_KEY_MAP[entry]));
-                        }
-                        // 3) Profile-only → that profile's current provider
-                        for (var k = 0; k < profiles.length; k++) {
-                            var prof = profiles[k];
-                            readThenMaybeWrite(Api.profileKeySlot(prof.id),
-                                Api.currentKeySlot(prof.id, prof.apiType, prof.providerName,
-                                    prof.apiEndpoint, prof.geminiAuthMethod));
-                        }
-                        // 4) Bare apiKey → active profile current
-                        if (profiles.length > 0) {
-                            var act = Profiles.getActive(profiles, Plasmoid.configuration.activeProfileId) || profiles[0];
-                            readThenMaybeWrite("apiKey", Api.currentKeySlot(act.id, act.apiType,
-                                act.providerName, act.apiEndpoint, act.geminiAuthMethod));
-                        }
-                        // 5) Without entryList: also copy each profile's known provider-only slot
-                        if (list.length === 0) {
-                            for (var a = 0; a < profiles.length; a++) {
-                                var pa = profiles[a];
-                                var pslot = Api.legacyProviderKeySlot(pa.apiType, pa.providerName,
-                                    pa.apiEndpoint, pa.geminiAuthMethod);
-                                for (var b = 0; b < profiles.length; b++) {
-                                    readThenMaybeWrite(pslot, Api.currentKeySlot(profiles[b].id,
-                                        pa.apiType, pa.providerName, pa.apiEndpoint, pa.geminiAuthMethod));
-                                }
-                            }
-                            readThenMaybeWrite("exaApiKey", Api.searchKeySlot("exa"));
-                            readThenMaybeWrite("ollamaSearchApiKey", Api.searchKeySlot("ollama"));
-                            readThenMaybeWrite("ollamaApiKey", Api.searchKeySlot("ollama"));
-                            readThenMaybeWrite("searxngApiKey", Api.searchKeySlot("searxng"));
-                        }
-                        if (pending === 0)
-                            checkDone();
-                    }
-
-                    walletCall("entryList", [new DBus.int32(handle), "PlasmaLLM", "PlasmaLLM"],
-                        function(entries) {
-                            var list = [];
-                            if (entries) {
-                                if (Array.isArray(entries)) list = entries;
-                                else if (entries.value && Array.isArray(entries.value)) list = entries.value;
-                            }
-                            scheduleCopies(list);
-                        },
-                        function(err) {
-                            console.warn("PlasmaLLM: wallet entryList failed, using known slots:", err);
-                            scheduleCopies([]);
-                        }
-                    );
-                });
-            },
-            function(err) {
-                console.warn("PlasmaLLM: wallet open for key migration failed:", err);
-                finish(migrateFallbackMap());
+        Wallet.readKey(DBus, slot,
+            Api.legacyKeySlots(
+                Plasmoid.configuration.activeProfileId,
+                Plasmoid.configuration.apiType,
+                Plasmoid.configuration.providerName,
+                Plasmoid.configuration.apiEndpoint,
+                Plasmoid.configuration.geminiAuthMethod
+            ),
+            fallbackMap(), Plasmoid.configuration.apiKey,
+            function(res) {
+                if (!isCurrent()) return;
+                root.walletAvailable = !!(res && res.available);
+                var key = (res && res.key) ? res.key : fallbackKeyForSlot(slot);
+                key = (key || "").replace(/^\s+|\s+$/g, "");
+                // Gemini AI Studio ↔ Agent Platform: sibling slots are searched,
+                // but if both are empty keep the previous in-memory key so a
+                // mid-switch send does not 401 on a cleared key.
+                if (!key && opts.keepPrevious && previousKey)
+                    key = previousKey;
+                root.apiKey = key;
+                if (res && res.available)
+                    root._walletRetryAttempt = 0;
+                else
+                    scheduleWalletRetry();
             }
         );
     }
 
-    function loadApiKeyFromWallet(gen) {
-        var myGen = (gen !== undefined && gen !== null) ? gen : root._configGen;
-        var slot = currentApiKeySlot();
-        // Fail closed while the new key loads — never keep the previous
-        // profile/provider key attached to an in-flight switch.
-        root.apiKey = "";
-        function isCurrent() {
-            return myGen === root._configGen && slot === currentApiKeySlot();
-        }
-        function applyKey(key) {
-            if (!isCurrent()) return;
-            root.apiKey = (key || "").replace(/^\s+|\s+$/g, "");
-        }
+    function scheduleLoadApiKey(hydrate, keepPrevious) {
+        if (root._switchingProfile) return;
+        // Hydrate is sticky (an extra model hydration is harmless);
+        // keepPrevious is last-writer-wins so a non-keep event (e.g. profile
+        // switch) clears a stale keep flag from an earlier Gemini auth change
+        // instead of carrying the old profile's key across the switch.
+        if (hydrate)
+            root._walletLoadHydrate = true;
+        root._walletLoadKeepPrevious = !!keepPrevious;
+        walletLoadDebounce.restart();
+    }
 
-        var trySlots = [slot].concat(Api.legacyKeySlots(
-            Plasmoid.configuration.activeProfileId,
-            Plasmoid.configuration.apiType,
-            Plasmoid.configuration.providerName,
-            Plasmoid.configuration.apiEndpoint,
-            Plasmoid.configuration.geminiAuthMethod
-        ));
-        var seen = {};
-        var slots = [];
-        for (var si = 0; si < trySlots.length; si++) {
-            if (!trySlots[si] || seen[trySlots[si]]) continue;
-            seen[trySlots[si]] = true;
-            slots.push(trySlots[si]);
-        }
+    // Express Mode cannot use Interactions; persist the clamped value so the
+    // settings UI and profile blob match what sendStreaming actually uses.
+    function normalizeGeminiApiVariant() {
+        if (Plasmoid.configuration.apiType !== "gemini")
+            return;
+        var clamped = Api.clampGeminiApiVariant(
+            Plasmoid.configuration.geminiApiVariant,
+            Plasmoid.configuration.geminiAuthMethod,
+            Plasmoid.configuration.geminiVertexAuthType);
+        if (clamped !== Plasmoid.configuration.geminiApiVariant)
+            Plasmoid.configuration.geminiApiVariant = clamped;
+    }
 
-        function closeHandle(handle) {
-            walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-        }
-
-        function tryReadAt(handle, index) {
-            if (!isCurrent()) {
-                closeHandle(handle);
-                return;
-            }
-            if (index >= slots.length) {
-                applyKey(fallbackKeyForSlot(slot));
-                closeHandle(handle);
-                return;
-            }
-            var readSlot = slots[index];
-            walletCall("readPassword", [new DBus.int32(handle), "PlasmaLLM", readSlot, "PlasmaLLM"],
-                function(password) {
-                    if (!isCurrent()) {
-                        closeHandle(handle);
-                        return;
-                    }
-                    if (password && password.length > 0) {
-                        applyKey(password);
-                        // Migrate legacy → primary (per profile+provider).
-                        if (readSlot !== slot) {
-                            walletWriteKey(handle, slot, password, function() {
-                                closeHandle(handle);
-                            });
-                        } else {
-                            closeHandle(handle);
-                        }
-                        return;
-                    }
-                    tryReadAt(handle, index + 1);
-                },
-                function(err) {
-                    tryReadAt(handle, index + 1);
-                }
-            );
-        }
-
-        walletCall("open", ["kdewallet", new DBus.int64(0), "PlasmaLLM"],
-            function(handle) {
-                if (!isCurrent()) {
-                    if (handle >= 0) closeHandle(handle);
-                    return;
-                }
-                if (handle < 0) {
-                    applyKey(fallbackKeyForSlot(slot));
-                    return;
-                }
-                root.walletAvailable = true;
-                tryReadAt(handle, 0);
-            },
-            function(err) {
-                console.warn("PlasmaLLM: KWallet open error:", err);
-                applyKey(fallbackKeyForSlot(slot));
-            }
-        );
+    function scheduleWalletRetry() {
+        if (root._walletRetryAttempt >= 4)
+            return;
+        root._walletRetryAttempt++;
+        var delays = [1000, 3000, 10000, 10000];
+        walletRetryTimer.interval = delays[root._walletRetryAttempt - 1];
+        walletRetryTimer.restart();
     }
 
     function hydrateFetchedModels() {
@@ -2555,11 +2497,10 @@ PlasmoidItem {
         }
     }
 
-    // Load a search API key: try v1/search/_/<provider>, then legacy wallet names, then config.
-    // slots: [primary, ...legacyNames]; configKeys: config property names to try as last resort.
+    // Load a search API key: v2|search, then v1/search and legacy names, then config.
     function loadSearchKeyFromWallet(provider, assignFn, configKeys, legacyNames) {
         var primary = Api.searchKeySlot(provider);
-        var trySlots = [primary].concat(legacyNames || []);
+        var extras = Api.searchLegacyKeySlots(provider).concat(legacyNames || []);
         var cfgFallback = "";
         for (var c = 0; c < (configKeys || []).length; c++) {
             var v = Plasmoid.configuration[configKeys[c]];
@@ -2568,46 +2509,11 @@ PlasmoidItem {
                 break;
             }
         }
-
-        function apply(key) {
-            assignFn(key || cfgFallback || "");
-        }
-
-        walletCall("open", ["kdewallet", new DBus.int64(0), "PlasmaLLM"],
-            function(handle) {
-                if (handle < 0) {
-                    apply("");
-                    return;
-                }
-                function tryAt(index) {
-                    if (index >= trySlots.length) {
-                        apply("");
-                        walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-                        return;
-                    }
-                    walletCall("readPassword", [new DBus.int32(handle), "PlasmaLLM", trySlots[index], "PlasmaLLM"],
-                        function(password) {
-                            if (password && password.length > 0) {
-                                apply(password);
-                                // Migrate legacy name → v1/search if needed
-                                if (trySlots[index] !== primary) {
-                                    walletWriteKey(handle, primary, password, function() {
-                                        walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-                                    });
-                                } else {
-                                    walletCall("close", [new DBus.int32(handle), new DBus.bool(false), "PlasmaLLM"], function(){}, function(){});
-                                }
-                                return;
-                            }
-                            tryAt(index + 1);
-                        },
-                        function() { tryAt(index + 1); }
-                    );
-                }
-                tryAt(0);
-            },
-            function() { apply(""); }
-        );
+        Wallet.readKey(DBus, primary, extras, fallbackMap(), cfgFallback, function(res) {
+            if (res && res.available)
+                root.walletAvailable = true;
+            assignFn((res && res.key) || cfgFallback || "");
+        });
     }
 
     function loadOllamaSearchKeyFromWallet() {
@@ -2793,7 +2699,7 @@ PlasmoidItem {
                 }
                 executeTool(toolToApprove.name, toolToApprove.args, toolToApprove.id);
             } else {
-                displayMessages.append({ role: "assistant", content: i18n("No tool request pending to approve."), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("No tool request pending to approve."), { shared: false });
             }
             return true;
         }
@@ -2810,7 +2716,7 @@ PlasmoidItem {
                 }
                 handleToolOutput(null, "", i18n("The user denied this tool call."), 1, { name: toolToDeny.name, callId: toolToDeny.id });
             } else {
-                displayMessages.append({ role: "assistant", content: i18n("No tool request pending to deny."), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("No tool request pending to deny."), { shared: false });
             }
             return true;
         }
@@ -2839,7 +2745,7 @@ PlasmoidItem {
             var msg = sessionAutoMode 
                 ? i18n("Skip approvals mode enabled for this session. All enabled tools will run automatically, bypassing 'Ask before running' settings.") 
                 : i18n("Skip approvals mode disabled. Tools will revert to your configured 'Ask before running' settings.");
-            displayMessages.append({ role: "assistant", content: msg, shared: false, timestamp: currentTimestamp() });
+            root.appendDisplayMessage("assistant", msg, { shared: false });
             
             if (systemPromptReady) {
                 var autoPrompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
@@ -2858,11 +2764,11 @@ PlasmoidItem {
         }
         if (lower === "/drive") {
             if (!Plasmoid.configuration.enableDesktopAutomation) {
-                displayMessages.append({ role: "assistant", content: i18n("Desktop automation is disabled in settings. Enable it first to drive the desktop."), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("Desktop automation is disabled in settings. Enable it first to drive the desktop."), { shared: false });
                 return true;
             }
             if (!root.isDriverServiceActive) {
-                displayMessages.append({ role: "assistant", content: i18n("plasmallm-desktop-driver is not detected or running."), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("plasmallm-desktop-driver is not detected or running."), { shared: false });
                 return true;
             }
             sessionAutoMode = !sessionAutoMode;
@@ -2881,7 +2787,7 @@ PlasmoidItem {
                        }).join("\n") +
                        "\n\n" + i18n("Type `/profile <name>` to switch.");
             }
-            displayMessages.append({ role: "assistant", content: msg, shared: false, timestamp: currentTimestamp() });
+            root.appendDisplayMessage("assistant", msg, { shared: false });
             return true;
         }
         if (lower.startsWith("/profile ")) {
@@ -2896,9 +2802,9 @@ PlasmoidItem {
             }
             if (found) {
                 switchProfile(found.id);
-                displayMessages.append({ role: "assistant", content: i18n("Switched to profile: **%1**", found.name), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("Switched to profile: **%1**", found.name), { shared: false });
             } else {
-                displayMessages.append({ role: "error", content: i18n("Unknown profile: **%1**", targetName), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("error", i18n("Unknown profile: **%1**", targetName), { shared: false });
             }
             return true;
         }
@@ -2913,7 +2819,7 @@ PlasmoidItem {
             } else {
                 msg += "\n\n" + i18n("No models cached. Use **Fetch Models** in settings.");
             }
-            displayMessages.append({ role: "assistant", content: msg, shared: false, timestamp: currentTimestamp() });
+            root.appendDisplayMessage("assistant", msg, { shared: false });
             return true;
         }
         if (lower.startsWith("/model ")) {
@@ -2936,8 +2842,13 @@ PlasmoidItem {
                     Profiles.saveProfiles(Plasmoid.configuration, profiles);
                 }
 
-                displayMessages.append({ role: "assistant", content: i18n("Switched to model: **%1**", newModel), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("Switched to model: **%1**", newModel), { shared: false });
             }
+            return true;
+        }
+        if (lower === "/skills") {
+            root.appendDisplayMessage("assistant", skillStatusText(), { shared: false });
+            loadSkills(true);
             return true;
         }
         if (lower === "/task") {
@@ -2945,10 +2856,10 @@ PlasmoidItem {
             var tasks = [];
             if (tasksJson) try { tasks = JSON.parse(tasksJson); } catch(e) {}
             if (tasks.length === 0) {
-                displayMessages.append({ role: "assistant", content: i18n("No tasks configured. Add tasks in Settings."), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("No tasks configured. Add tasks in Settings."), { shared: false });
             } else {
                 var taskList = tasks.map(function(t) { return "- **" + t.name + "**" + (t.auto ? " " + i18n("(auto)") : "") + " — " + t.prompt; }).join("\n");
-                displayMessages.append({ role: "assistant", content: i18n("Available tasks:") + "\n" + taskList + "\n\n" + i18n("Type `/task <name>` to run."), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("assistant", i18n("Available tasks:") + "\n" + taskList + "\n\n" + i18n("Type `/task <name>` to run."), { shared: false });
             }
             return true;
         }
@@ -2991,7 +2902,7 @@ PlasmoidItem {
                 return true;
             } else {
                 var availNames = tasks2.map(function(t) { return t.name; }).join(", ");
-                displayMessages.append({ role: "error", content: i18n("Unknown task: **%1**. Available: %2", taskName, availNames || i18n("none")), shared: false, timestamp: currentTimestamp() });
+                root.appendDisplayMessage("error", i18n("Unknown task: **%1**. Available: %2", taskName, availNames || i18n("none")), { shared: false });
                 return true;
             }
         }
@@ -3020,8 +2931,10 @@ PlasmoidItem {
             var turnId = nextTurnId();
             var chatMsgId = nextMsgId("c");
             var attachJson = attachments.length > 0 ? JSON.stringify(attachments) : "";
-            var imagePaths = attachments.filter(function(a) { return !!a.dataUrl; }).map(function(a) {
-                return (a.dataUrl && a.filePath.startsWith("/tmp/plasmallm_paste_")) ? a.dataUrl : a.filePath;
+            // Every attachment gets a display entry; pasted temp images fall
+            // back to their dataUrl because the temp file is deleted after send.
+            var displayPaths = attachments.map(function(a) {
+                return (a.dataUrl && a.filePath && a.filePath.startsWith("/tmp/plasmallm_paste_")) ? a.dataUrl : a.filePath;
             });
             // Hidden STT tag for the model only (not shown in the chat bubble).
             var apiText = fromVoice ? ("[voice STT]\n" + text) : text;
@@ -3036,7 +2949,7 @@ PlasmoidItem {
             root.appendDisplayMessage("user", text, {
                 turnId: turnId,
                 apiMsgId: chatMsgId,
-                attachmentsStr: imagePaths.join("\n"),
+                attachmentsStr: displayPaths.filter(function(p) { return !!p; }).join("\n"),
                 fromVoice: fromVoice
             });
 
@@ -3072,12 +2985,7 @@ PlasmoidItem {
         }
 
         if (!Plasmoid.configuration.apiEndpoint || !Plasmoid.configuration.modelName) {
-            displayMessages.append({
-                role: "error",
-                content: "Please configure API endpoint and model name in widget settings.",
-                shared: false,
-                timestamp: currentTimestamp(),
-            });
+            root.appendDisplayMessage("error", "Please configure API endpoint and model name in widget settings.", { shared: false });
             isLoading = false;
             return;
         }
@@ -3213,7 +3121,11 @@ PlasmoidItem {
                         });
                     }
                     if (atts.length > 0) {
-                        msgContent = Api.buildContentArray(root.effectiveApiType, msgContent, atts, Plasmoid.configuration.usesResponsesAPI);
+                        msgContent = Api.buildContentArray(root.effectiveApiType, msgContent, atts, Plasmoid.configuration.usesResponsesAPI, {
+                            model: Plasmoid.configuration.modelName,
+                            endpoint: Plasmoid.configuration.apiEndpoint,
+                            providerName: Plasmoid.configuration.providerName
+                        });
                     }
                 } catch(e) {}
             }
@@ -3263,6 +3175,12 @@ PlasmoidItem {
         ToolCallNormalizer.logNotes("sendToLLM", reconciled.notes);
         messages = reconciled.messages;
 
+        // Replace already-delivered skill bodies with stubs: the full text
+        // rides in the system prompt's Active Skills section, so paying for
+        // it again inside the tool result is pure duplication. Runs after
+        // reconciliation so it only rewrites results that survived pairing.
+        messages = Skills.stubDeliveredSkillResults(messages, root.activeSkills);
+
         var tools = Api.buildTools(root.effectiveApiType, {
             webSearchProvider: Plasmoid.configuration.webSearchProvider,
             searxngUrl: Plasmoid.configuration.searxngUrl,
@@ -3273,6 +3191,9 @@ PlasmoidItem {
             commandToolEnabled: Plasmoid.configuration.useCommandTool,
             webSearchEnabled: Plasmoid.configuration.enableWebSearch,
             usesResponsesAPI: Plasmoid.configuration.usesResponsesAPI,
+            model: Plasmoid.configuration.modelName,
+            endpoint: Plasmoid.configuration.apiEndpoint,
+            providerName: Plasmoid.configuration.providerName,
             nativeGoogleSearchEnabled: Plasmoid.configuration.enableNativeGoogleSearch,
             nativeCodeExecutionEnabled: Plasmoid.configuration.enableNativeCodeExecution,
             toolsConfig: getToolsConfig()
@@ -3289,21 +3210,28 @@ PlasmoidItem {
                 maxTokens: Plasmoid.configuration.maxTokens,
                 reasoningEffort: Plasmoid.configuration.reasoningEffort,
                 thinkingBudget: Plasmoid.configuration.thinkingBudget,
+                showThoughts: Plasmoid.configuration.showThoughts,
                 usesResponsesAPI: Plasmoid.configuration.usesResponsesAPI,
-                geminiApiVariant: Plasmoid.configuration.geminiApiVariant,
+                geminiApiVariant: Api.clampGeminiApiVariant(
+                    Plasmoid.configuration.geminiApiVariant,
+                    Plasmoid.configuration.geminiAuthMethod,
+                    Plasmoid.configuration.geminiVertexAuthType),
                 geminiAuthMethod: Plasmoid.configuration.geminiAuthMethod,
                 geminiVertexAuthType: Plasmoid.configuration.geminiVertexAuthType,
                 geminiProjectId: Plasmoid.configuration.geminiProjectId,
                 geminiLocation: Plasmoid.configuration.geminiLocation,
+                providerName: Plasmoid.configuration.providerName,
                 tools: tools,
                 onChunk: function(delta, accumulated) {
                     if (streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count) {
                         displayMessages.setProperty(streamingMessageIndex, "content", accumulated);
+                        root.chatContentChanged();
                     }
                 },
                 onThinkingChunk: function(delta, accumulated) {
                     if (streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count) {
                         displayMessages.setProperty(streamingMessageIndex, "thinking", accumulated);
+                        root.chatContentChanged();
                     }
                 },
                 onComplete: function(fullText, error, toolCalls, assistantMsg) {
@@ -3523,7 +3451,7 @@ PlasmoidItem {
 
         var next = pendingToolCalls[0];
         var toolsConfig = getToolsConfig();
-        if (ToolManager.isAutoRun(next.name, toolsConfig)) {
+        if (ToolManager.isAutoRun(next.name, toolsConfig, next.args)) {
             executeTool(next.name, next.args, next.id, next.turnId);
         } else {
             // Show approval card
@@ -3549,23 +3477,24 @@ PlasmoidItem {
             var path = args.path || "";
             var paths = {
                 home: sysInfo.userHome || "$HOME",
+                homeEnv: sysInfo.homeEnv || "",
                 xdgData: sysInfo.xdgDataHome,
                 xdgConfig: sysInfo.xdgConfigHome,
                 xdgCache: sysInfo.xdgCacheHome,
                 xdgRuntime: sysInfo.xdgRuntimeDir
             };
             if (!ToolManager.isPathAllowed(path, Plasmoid.configuration.toolsPathWhitelist, paths)) {
-                var displayPath = ToolManager.contractPath(path, paths.home);
+                var displayPath = ToolManager.contractPath(path, paths.home, paths.homeEnv);
                 handleToolOutput(null, "", i18n("Error: path '%1' outside whitelist", displayPath), 1, { name: name, callId: callId, turnId: turnId });
                 return;
             }
             // Expand and normalize it for internal execution
-            args.path = ToolManager.normalizePath(ToolManager.expandPath(path, paths));
+            args.path = ToolManager.normalizePath(ToolManager.resolveHomePath(path, paths));
         }
 
         // Create a visible indicator if it's not auto-run or if it's a side-effect tool
         var displayIndex = -1;
-        var isAuto = ToolManager.isAutoRun(name, toolsConfig);
+        var isAuto = ToolManager.isAutoRun(name, toolsConfig, args);
         var metadata = ToolManager.getToolMetadata(name, toolsConfig);
         var scheme = metadata && metadata.outputScheme ? metadata.outputScheme : "";
         if (!tool.uiHidden && (tool.sideEffect || !isAuto)) {
@@ -3583,6 +3512,18 @@ PlasmoidItem {
         var context = {
             config: Plasmoid.configuration,
             i18n: i18n,
+            getSkills: function() {
+                return root.loadedSkills;
+            },
+            resolveSkillScript: function(scriptArgs) {
+                return Skills.resolveSkillScript(scriptArgs, root.loadedSkills, getToolsConfig());
+            },
+            getMemory: function() {
+                return root.memoryPhrases.slice();
+            },
+            setMemory: function(list) {
+                root.setMemoryPhrases(list);
+            },
             getSecret: function(key) {
                 return root[key] !== undefined ? root[key] : "";
             },
@@ -3680,10 +3621,11 @@ PlasmoidItem {
         var scheme = metadata && metadata.outputScheme ? metadata.outputScheme : "";
 
         var home = sysInfo.userHome || "$HOME";
+        var homeEnv = sysInfo.homeEnv || "";
         var status = exitCode === 0 ? "ok" : "error";
         var header = "[" + name;
         if (args.path) {
-            header += ": " + ToolManager.contractPath(args.path, home);
+            header += ": " + ToolManager.contractPath(args.path, home, homeEnv);
         } else if (args.url) {
             header += ": " + args.url;
         } else if (status !== "ok") {
@@ -3729,17 +3671,31 @@ PlasmoidItem {
         if (stderr) result += (stdout ? "\n" : "") + "stderr: " + stderr;
 
         // Privacy: contract absolute home paths back to ~
-        result = ToolManager.contractAllPaths(result, home);
+        result = ToolManager.contractAllPaths(result, home, homeEnv);
+
+        // Skill loads get a compact chat card: the body already lives in the
+        // system prompt's Active Skills section, so dumping thousands of
+        // characters into the transcript window is pure noise.
+        var displayContent = result;
+        var displayStdout = stdout || "";
+        if (name === "skill" && exitCode === 0) {
+            displayStdout = i18n("Loaded '%1' skill — its full instructions were added to this conversation's context.", args.name || "");
+            displayContent = "[" + name + "] " + displayStdout;
+        }
 
         var tool = ToolManager.getTool(name, Plasmoid.configuration);
 
-        var imagePathsStr = "";
+        var attachmentPathsStr = "";
         if (attachmentsJson) {
             try {
                 var atts = JSON.parse(attachmentsJson);
-                var imagePaths = atts.filter(function(a) { return !!a.dataUrl; }).map(function(a) { return a.dataUrl; });
-                if (imagePaths.length > 0) {
-                    imagePathsStr = imagePaths.join("\n");
+                // Show every attachment; pasted temp images fall back to their
+                // dataUrl because the temp file is deleted after capture.
+                var attPaths = atts.map(function(a) {
+                    return (a.dataUrl && a.filePath && a.filePath.startsWith("/tmp/plasmallm_paste_")) ? a.dataUrl : (a.filePath || a.dataUrl || "");
+                }).filter(function(p) { return !!p; });
+                if (attPaths.length > 0) {
+                    attachmentPathsStr = attPaths.join("\n");
                 }
             } catch(e) {}
         }
@@ -3750,19 +3706,20 @@ PlasmoidItem {
             var msg = displayMessages.get(displayIndex);
             if (msg.role === "tool_running" && msg.tool_call_id === callId) {
                 displayMessages.setProperty(displayIndex, "role", "tool_result");
-                displayMessages.setProperty(displayIndex, "content", result);
+                displayMessages.setProperty(displayIndex, "content", displayContent);
                 displayMessages.setProperty(displayIndex, "toolArgs", JSON.stringify(args));
                 displayMessages.setProperty(displayIndex, "tool_call_id", callId);
                 displayMessages.setProperty(displayIndex, "callId", callId);
-                displayMessages.setProperty(displayIndex, "stdout", stdout || "");
+                displayMessages.setProperty(displayIndex, "stdout", displayStdout);
                 displayMessages.setProperty(displayIndex, "stderr", stderr || "");
                 displayMessages.setProperty(displayIndex, "exitCode", exitCode);
                 displayMessages.setProperty(displayIndex, "outputScheme", scheme);
                 displayMessages.setProperty(displayIndex, "shared", true);
-                if (imagePathsStr) {
-                    displayMessages.setProperty(displayIndex, "attachmentsStr", imagePathsStr);
+                if (attachmentPathsStr) {
+                    displayMessages.setProperty(displayIndex, "attachmentsStr", attachmentPathsStr);
                 }
                 updatedInPlace = true;
+                root.chatContentChanged();
             }
         }
 
@@ -3777,18 +3734,38 @@ PlasmoidItem {
             }
 
             // Append to UI
-            root.appendDisplayMessage("tool_result", result, {
+            root.appendDisplayMessage("tool_result", displayContent, {
                 turnId: (info && info.turnId) || "",
                 toolName: name,
                 toolArgs: JSON.stringify(args),
                 tool_call_id: callId,
-                stdout: stdout || "",
+                stdout: displayStdout,
                 stderr: stderr || "",
                 exitCode: exitCode,
                 shared: true,
                 outputScheme: scheme,
-                attachmentsStr: imagePathsStr
+                attachmentsStr: attachmentPathsStr
             });
+        }
+
+        // Track skill activation: once a body is loaded it is re-injected in
+        // full into every system prompt rebuild, so context compaction and
+        // message capping can never drop it mid-session. Rebuild the prompt
+        // immediately so the follow-up request already carries the body.
+        if (name === "skill" && exitCode === 0 && args.name && root.activeSkills.indexOf(args.name) === -1) {
+            root.activeSkills.push(args.name);
+            initSystemPrompt();
+        }
+
+        // Auto-refresh skills when a file is written into any skills root
+        if (name === "write_file" && exitCode === 0 && args.path) {
+            var homePaths = {
+                home: sysInfo.userHome || "$HOME",
+                homeEnv: sysInfo.homeEnv || ""
+            };
+            if (Skills.isSkillPath(args.path, skillsRoots(), homePaths)) {
+                loadSkills(true);
+            }
         }
 
         // Append to chat history
@@ -3803,8 +3780,8 @@ PlasmoidItem {
         };
         if (attachmentsJson) {
             chatEntry.attachments_json = attachmentsJson;
-            if (imagePathsStr) {
-                chatEntry.attachmentsStr = imagePathsStr;
+            if (attachmentPathsStr) {
+                chatEntry.attachmentsStr = attachmentPathsStr;
             }
         }
         chatMessages.append(chatEntry);
@@ -3906,35 +3883,6 @@ PlasmoidItem {
         }
     }
 
-    function updateSessionStatus() {
-        if (!SessionRunner.isEnabled(Plasmoid.configuration)) {
-            sessionActive = false;
-            return;
-        }
-        var be = SessionRunner.backend(Plasmoid.configuration);
-        var sess = SessionRunner.sessionName(Plasmoid.configuration);
-        var cmd = be === "tmux" ? "tmux has-session -t '" + sess + "' 2>/dev/null" : "screen -ls '" + sess + "' | grep -q '\\." + sess + "\\b'";
-        statusCheckCommands.push(cmd);
-        executable.connectSource(cmd);
-    }
-
-    function resetSession() {
-        if (SessionRunner.isEnabled(Plasmoid.configuration)) {
-            var killCmd = SessionRunner.killSession(Plasmoid.configuration);
-            saveCommands.push(killCmd); // Use saveCommands to avoid output bubble
-            executable.connectSource(killCmd);
-            sessionActive = false;
-            displayMessages.append({
-                role: "assistant",
-                content: i18n("Session reset requested."),
-
-                shared: false,
-                timestamp: currentTimestamp(),
-            });
-            Qt.callLater(updateSessionStatus);
-        }
-    }
-
 
     function shareOutput(index) {
         if (index < 0 || index >= displayMessages.count) return;
@@ -3969,12 +3917,7 @@ PlasmoidItem {
             DriverManager.startSession(clientToken, function(err, token, isAlreadyAuthorized) {
                 root.isHandshakePending = false;
                 if (err) {
-                    displayMessages.append({
-                        role: "error",
-                        content: i18n("Failed to start drive session: %1", err.error || err),
-                        shared: false,
-                        timestamp: root.currentTimestamp()
-                    });
+                    root.appendDisplayMessage("error", i18n("Failed to start drive session: %1", err.error || err), { shared: false });
                     root.isDrivingActive = false;
                     root.isDrivingPending = false;
                     driverPendingTimeoutTimer.stop();
@@ -3988,12 +3931,7 @@ PlasmoidItem {
                         root.isDrivingActive = false;
                         root.isDrivingPending = true;
                         driverPendingTimeoutTimer.restart();
-                        displayMessages.append({
-                            role: "assistant",
-                            content: i18n("Waiting for desktop automation consent…"),
-                            shared: false,
-                            timestamp: root.currentTimestamp()
-                        });
+                        root.appendDisplayMessage("assistant", i18n("Waiting for desktop automation consent…"), { shared: false });
                     }
                     if (systemPromptReady) {
                         var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, {
@@ -4045,6 +3983,12 @@ PlasmoidItem {
         function onToolsNotifyAutoRunChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onToolsOpenUrlEnabledChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onToolsOpenUrlAutoRunChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onToolsEditMemoryEnabledChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onToolsEditMemoryAutoRunChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onMemoryPhrasesChanged() {
+            loadMemoryPhrases();
+            if (systemPromptReady) initSystemPrompt();
+        }
         function onToolsPathWhitelistChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onToolsReadMaxBytesChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onToolsWriteMaxBytesChanged() { if (systemPromptReady) initSystemPrompt(); }
@@ -4060,32 +4004,26 @@ PlasmoidItem {
             if (!root.walletAvailable) root.apiKey = fallbackKeyForSlot(currentApiKeySlot());
         }
         function onApiKeyVersionChanged() {
-            // Wallet-available path: key was just written to KWallet by config page
-            root._configGen++;
-            loadApiKeyFromWallet(root._configGen);
+            scheduleLoadApiKey(false);
         }
         function onApiTypeChanged() {
-            if (root._switchingProfile) return;
-            root._configGen++;
-            loadApiKeyFromWallet(root._configGen);
-            hydrateFetchedModels();
+            scheduleLoadApiKey(true);
         }
         function onProviderNameChanged() {
-            if (root._switchingProfile) return;
-            root._configGen++;
-            loadApiKeyFromWallet(root._configGen);
-            hydrateFetchedModels();
+            scheduleLoadApiKey(true);
         }
         function onGeminiAuthMethodChanged() {
-            if (root._switchingProfile) return;
-            root._configGen++;
-            loadApiKeyFromWallet(root._configGen);
+            normalizeGeminiApiVariant();
+            // Sibling Gemini slots may still hold the same key; keep previous
+            // until the wallet read finishes so chat does not 401 mid-switch.
+            scheduleLoadApiKey(true, true);
+        }
+        function onGeminiVertexAuthTypeChanged() {
+            normalizeGeminiApiVariant();
+            scheduleLoadApiKey(true, true);
         }
         function onActiveProfileIdChanged() {
-            if (root._switchingProfile) return;
-            root._configGen++;
-            loadApiKeyFromWallet(root._configGen);
-            hydrateFetchedModels();
+            scheduleLoadApiKey(true);
         }
         function onOllamaSearchApiKeyChanged() {
             if (Plasmoid.configuration.ollamaSearchApiKey) root.ollamaSearchApiKey = Plasmoid.configuration.ollamaSearchApiKey;
@@ -4106,13 +4044,9 @@ PlasmoidItem {
             loadExaKeyFromWallet();
         }
         function onApiEndpointChanged() {
-            // Custom endpoints are part of the chat key / model-cache slot
-            // (…/openai/[url]). Named presets ignore URL in the slot, so a
-            // reload is a cheap no-op identity match.
-            if (root._switchingProfile) return;
-            root._configGen++;
-            loadApiKeyFromWallet(root._configGen);
-            hydrateFetchedModels();
+            // Custom OpenAI endpoints are part of the chat key / model-cache slot.
+            // Named presets and Gemini ignore URL in the slot.
+            scheduleLoadApiKey(true);
         }
         function onChatSaveFormatChanged() {
             if (Plasmoid.configuration.chatSaveFormat === "jsonl" && historyFilesModel.count === 0) {
@@ -4157,6 +4091,12 @@ PlasmoidItem {
         function onSysInfoNetworkChanged()  { if (systemPromptReady) regatherSysInfo(); }
         function onSysInfoLocaleChanged()   { if (systemPromptReady) regatherSysInfo(); }
         function onSysInfoDateTimeChanged() { if (systemPromptReady) initSystemPrompt(); }
+
+        // Skills: rescan when scan roots change or on refresh
+        function onSkillsScanClaudeChanged() { loadSkills(true); }
+        function onSkillsScanAgentsChanged() { loadSkills(true); }
+        function onSkillsExtraDirsChanged()  { loadSkills(true); }
+        function onSkillsRescanChanged()     { loadSkills(true); }
     }
 
     Timer {
@@ -4184,6 +4124,30 @@ PlasmoidItem {
                 sysInfoPending = 0;
                 initSystemPrompt();
             }
+        }
+    }
+
+    Timer {
+        id: walletLoadDebounce
+        interval: 80
+        repeat: false
+        onTriggered: {
+            root._configGen++;
+            var keep = root._walletLoadKeepPrevious;
+            root._walletLoadKeepPrevious = false;
+            loadApiKeyFromWallet(root._configGen, { keepPrevious: keep });
+            if (root._walletLoadHydrate)
+                hydrateFetchedModels();
+            root._walletLoadHydrate = false;
+        }
+    }
+
+    Timer {
+        id: walletRetryTimer
+        interval: 1000
+        repeat: false
+        onTriggered: {
+            loadApiKeyFromWallet(root._configGen, { keepPrevious: true });
         }
     }
 
@@ -4419,6 +4383,31 @@ fi
             Plasmoid.configuration.profilesSchemaVersion = 5;
         }
 
+        // Migration: v5 -> v6 (persistent memory placeholder).
+        // Vanilla copies of the template — stored verbatim by earlier
+        // migrations or profile saves — gain the new {{memories}} placeholder.
+        // Genuinely customized templates are left untouched.
+        if (Plasmoid.configuration.profilesSchemaVersion === 5) {
+            var baseTemplateV6 = Api.DEFAULT_SYSTEM_PROMPT_TEMPLATE;
+            var previousTemplate = baseTemplateV6.replace("{{memories}}\n", "");
+            if (Plasmoid.configuration.systemPrompt &&
+                    Plasmoid.configuration.systemPrompt === previousTemplate) {
+                Plasmoid.configuration.systemPrompt = baseTemplateV6;
+            }
+            var profilesV6 = Profiles.loadProfiles(Plasmoid.configuration);
+            var profilesV6Dirty = false;
+            profilesV6.forEach(function(p) {
+                if (p.systemPrompt === previousTemplate) {
+                    p.systemPrompt = baseTemplateV6;
+                    profilesV6Dirty = true;
+                }
+            });
+            if (profilesV6Dirty) {
+                Profiles.saveProfiles(Plasmoid.configuration, profilesV6);
+            }
+            Plasmoid.configuration.profilesSchemaVersion = 6;
+        }
+
         // Seed sysInfo from previous run if available
         if (Plasmoid.configuration.gatheredSysInfo) {
             try {
@@ -4427,6 +4416,9 @@ fi
         }
 
         regatherSysInfo();
+        loadSkills();
+        loadMemoryPhrases();
+        normalizeGeminiApiVariant();
         // Migrate wallet keys to profile+provider slots, then load the active key.
         migrateApiKeySlotScheme(function(ran) {
             root._configGen++;
@@ -4472,14 +4464,20 @@ fi
             focusSettleTimer.stop();
             root.preventDeactivationClose = false;
             Plasmoid.configuration.lastClosedTimestamp = String(Date.now());
+            if (Plasmoid.status === PlasmaCore.Types.AcceptingInputStatus) {
+                Plasmoid.status = PlasmaCore.Types.ActiveStatus;
+            }
         } else {
             root.preventDeactivationClose = true;
             focusSettleTimer.start();
+            // Pick up newly dropped SKILL.md folders when the panel opens
+            // (throttled; forced rescans happen via settings changes).
+            loadSkills();
             var hadUnread = root.hasUnreadResponse;
             if (root.hasUnreadResponse) {
                 root.hasUnreadResponse = false;
-                Plasmoid.status = PlasmaCore.Types.ActiveStatus;
             }
+            Plasmoid.status = PlasmaCore.Types.AcceptingInputStatus;
             if (hadUnread) return;
             var mode = Plasmoid.configuration.autoClearMode;
             if (mode === 1) {

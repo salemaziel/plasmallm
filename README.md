@@ -10,13 +10,13 @@ PlasmaLLM is designed for quick tasks and system-integrated workflows—not as a
 
 ## Features
 
-- **Multi-Provider Support**: Connects to Ollama, LM Studio, OpenAI, Anthropic Claude, Google Gemini, OpenCode Go, and any OpenAI-compatible API.
+- **Multi-Provider Support**: Connects to Ollama, LM Studio, OpenAI, Anthropic Claude, Google Gemini, OpenCode Zen/Go, and any OpenAI-compatible API.
 - **System Awareness**: Optionally gathers hardware, OS, and environment info to provide context for assistant responses.
 - **Tool-Calling System**: Modular architecture allowing LLMs to interact with the filesystem, run shell commands, and fetch web data (with user approval).
 - **Interactive Terminal Blocks**: View, copy, or execute suggested terminal commands. Supports session multiplexing via `tmux` or `screen`.
 - **Web Search Integration**: Native support for DuckDuckGo and SearXNG.
 - **Vision Support**: Supports image attachments for providers with multimodal capabilities (e.g., Gemini).
-- **Voice Input (STT)**: Hold-to-talk microphone that transcribes via a designated profile (OpenAI-compatible `/audio/transcriptions`, e.g. OpenRouter `openai/gpt-transcribe`) and sends the text to your active chat profile.
+- **Voice Input (STT)**: Hold-to-talk microphone that transcribes via an OpenAI-compatible `/audio/transcriptions` API (e.g. OpenRouter `openai/gpt-transcribe`) or a local OpenAI Whisper CLI, then sends the text to your active chat profile.
 - **Secure Storage**: Integrates with KWallet for secure management of API keys and secrets.
 - **Markdown Rendering**: Full support for markdown, including syntax highlighting for code blocks and LaTeX for mathematical notation.
 - **Context Compaction**: Save tokens and speed up local model processing by reducing the size of the context that needs to process.
@@ -28,21 +28,37 @@ PlasmaLLM is designed for quick tasks and system-integrated workflows—not as a
 - Optional: `python3-matplotlib`, `python3-dbus`, and `python3-gobject` (or distro equivalents) for Mathtext LaTeX rendering
 - Optional: `qt6-qtmultimedia` (or distro equivalent) for microphone capture via Qt Multimedia (Voice Input)
 - Optional: `pw-record`, `ffmpeg`, or `arecord` as a shell fallback if Qt capture is unavailable (Voice Input)
+- Optional: OpenAI Whisper CLI (`whisper` from the `openai-whisper` Python package) for local speech-to-text
 - Optional: `tmux` or `screen` for session multiplexing.
 
 ### Voice input setup
 
 1. Open **Configure PlasmaLLM → Speech to Text**.
 2. Enable **microphone input**.
-3. Choose a provider (e.g. **OpenRouter**), confirm endpoint `https://openrouter.ai/api/v1`.
-4. Click **Fetch models** (this queries transcription models — OpenRouter does **not** list them on the normal chat model list).
-5. Select a model such as `openai/gpt-transcribe`, save your API key.
-6. **Mic button** mode:
+3. Choose **STT backend**.
+
+#### OpenAI-compatible API
+
+4. Choose a provider (e.g. **OpenRouter**), confirm endpoint `https://openrouter.ai/api/v1`.
+5. Click **Fetch models** (this queries transcription models — OpenRouter does **not** list them on the normal chat model list).
+6. Select a model such as `openai/gpt-transcribe`, save your API key.
+
+#### OpenAI Whisper (local CLI)
+
+4. Select **OpenAI Whisper (local CLI)**.
+5. Set **Command** if `whisper` is not on your PATH. The field is a prefix inserted as-is, for example `python3 -m whisper` or `toolbox run whisper`.
+6. Choose a model (`base` is the default). The first run may download weights into `~/.cache/whisper`.
+7. Optional: task (transcribe/translate), device (`cpu`/`cuda`), FP16, threads, initial prompt, extra CLI args.
+8. Use **Test CLI** to confirm the command responds to `--help`. No STT API key is required.
+
+Then, for either backend:
+
+9. **Mic button** mode:
    - **Auto** (default): short click toggles recording; press and hold (~250 ms+) for push-to-talk until release.
    - **Hold to talk**: press-and-hold only.
    - **Toggle**: click to start, click again to stop and send.
-7. Optional: set a **Voice shortcut** (default **Ctrl+M**) while the panel is open and focused. It follows the same **Mic button** mode (auto / hold / toggle). Clear the field to disable. To open the panel from elsewhere, use **Activate widget** on the dialog’s Shortcuts page.
-8. Your **active chat profile** (General page) is still used for the conversation; STT is only the speech engine.
+10. Optional: set a **Voice shortcut** (default **Ctrl+M**) while the panel is open and focused. It follows the same **Mic button** mode (auto / hold / toggle). Clear the field to disable. To open the panel from elsewhere, use **Activate widget** on the dialog’s Shortcuts page.
+11. Your **active chat profile** (General page) is still used for the conversation; STT is only the speech engine.
 
 ### OpenCode Go setup
 
@@ -105,8 +121,9 @@ Right-click the widget and select **Configure PlasmaLLM...**:
 
 - **General**: Set your provider, model, and API keys.
 - **Appearance**: Configure fonts, bubble styles, and interface behavior.
-- **Tools**: Enable/disable specific tools and configure the filesystem whitelist for sandboxed operations.
+- **Tools**: Enable/disable specific tools and configure the filesystem whitelist for sandboxed operations. Finished tool results collapse to a small pill by default (per-tool toggle); click to expand.
 - **Tasks**: Manage custom script tools and shell command templates.
+- **Skills**: Discover and toggle Agent Skills (`SKILL.md` folders or `<name>.md` files) loaded on demand. PlasmaLLM ships a bundled `create-skill` helper; add your own under `~/.local/share/plasmallm/skills/` or extra directories in Settings. Skills may include `.sh` scripts run via `run_skill_script`; enable “Allow running skill scripts without approval” per skill in Settings. Use `/skills` in chat to list what is available.
 
 ## Support
 

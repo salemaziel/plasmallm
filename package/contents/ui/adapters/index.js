@@ -31,6 +31,8 @@ function getAdapter(apiType) {
         return Gemini;
     case "gemini_interactions":
         return GeminiInteractions;
+    case "opencode":
+        return OpenCode;
     case "openai":
     default:
         return OpenAI;

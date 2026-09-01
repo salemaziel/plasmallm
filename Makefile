@@ -22,13 +22,28 @@ FIND_JUNK := $(foreach d,$(JUNK_DIRS),-name '$(d)' -o) -false
 
 all: package
 
+# Covers the .pragma library JavaScript only — QML needs a running shell and is
+# still verified by hand. Requires node, at development time only.
+#
+# Two suites, kept separate because they are written against different runners:
+# the .mjs files are standalone node scripts, run.sh drives the .test.js suite
+# through the shared harness in tests/qmlmodule.js.
+test:
+	node tests/wallet_core.mjs
+	node tests/gemini_thinking.mjs
+	node tests/skills.mjs
+	node tests/memory.mjs
+	node tests/path_sandbox.mjs
+	node tests/opencode_route.mjs
+	@./tests/run.sh
+
 # Translations
 translations: check-translations $(MO_FILES)
 
 $(LOCALE_DIR)/$(DOMAIN).pot: $(SRC_FILES)
 	@echo "Extracting translation strings..."
 	xgettext --from-code=UTF-8 --language=JavaScript \
-		--keyword=i18n --keyword=i18n:1,2 \
+		--keyword=i18n \
 		--package-name="PlasmaLLM" \
 		--no-location \
 		-o $@ $^
@@ -110,11 +125,6 @@ install-dev:
 	@rm -rf $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@ln -sfv $$(pwd)/$(PACKAGE_DIR) $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@echo "Dev install complete. Restart Plasma to load: plasmashell --replace &"
-
-# Covers the .pragma library JavaScript only — QML needs a running shell and is
-# still verified by hand. Requires node, at development time only.
-test:
-	@./tests/run.sh
 
 remove:
 	@echo "Removing PlasmaLLM..."

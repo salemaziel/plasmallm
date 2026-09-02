@@ -13,6 +13,7 @@ import org.kde.plasma.plasma5support as P5Support
 import org.kde.plasma.workspace.dbus as DBus
 
 import "api.js" as Api
+import "toolManager.js" as ToolManager
 
 /**
  * Renders a single chat message (user, assistant, tool result, etc.)
@@ -218,6 +219,30 @@ Kirigami.AbstractCard {
     readonly property bool isToolPending: role === "tool_pending"
     readonly property bool isToolRunning: role === "tool_running"
     readonly property bool isToolResult: role === "tool_result"
+    // FYI-only pill for successful skill loads — the body went into system
+    // context, not something the user needs to read.
+    readonly property bool isSkillLoadedChip: isToolResult && !isToolRunning
+        && toolName === "skill" && exitCode === 0
+
+    // Successful plain tool results start collapsed as a small pill when the
+    // per-tool preference says so; click to expand, chevron to re-collapse.
+    readonly property bool toolCollapsibleResult: !isSkillLoadedChip
+        && isToolResult && exitCode === 0
+        && ToolManager.shouldCollapseResult(toolName, appConfig.toolsCollapseResults, appConfig.customTools)
+    property bool toolResultExpanded: false
+
+    readonly property var _parsedToolArgs: {
+        try {
+            if (typeof toolArgs === "string" && toolArgs.length > 0) return JSON.parse(toolArgs);
+            return (toolArgs && typeof toolArgs === "object") ? toolArgs : {};
+        } catch (e) { return {}; }
+    }
+    readonly property string toolPillText: {
+        var home = "$HOME";
+        if (typeof root !== 'undefined' && root.sysInfo && root.sysInfo.userHome) home = root.sysInfo.userHome;
+        if (isSkillLoadedChip) return i18n("Loaded %1 skill", _parsedToolArgs.name || "");
+        return ToolManager.resultLabel(toolName, _parsedToolArgs, home);
+    }
     readonly property string strippedContent: content.trim()
     readonly property bool hasBubbleContent: !isToolPending && !isToolRunning && !isToolResult && (isAwaitingResponse || !isAssistant || strippedContent.length > 0)
 
@@ -363,22 +388,50 @@ Kirigami.AbstractCard {
             }
 
             Rectangle {
+                id: thinkingBox
                 Layout.fillWidth: true
-                Layout.preferredHeight: thinkingText.implicitHeight + Kirigami.Units.gridUnit
+
+                // Height is clamped rather than tracking the text directly.
+                // The box is sized from the text's implicitHeight, and wrapped
+                // text only knows its height once it knows its width — so a
+                // bad width binding silently collapses the whole drawer to
+                // about one line. The floor makes that unreadable state
+                // unreachable whatever the text reports; the ceiling stops a
+                // long chain of reasoning from pushing the reply off screen,
+                // with the Flickable taking over past that point.
+                readonly property real naturalHeight: thinkingText.implicitHeight + messageItem.bubblePadding * 2
+                readonly property real minHeight: Kirigami.Units.gridUnit * 6
+                readonly property real maxHeight: Kirigami.Units.gridUnit * 20
+                Layout.preferredHeight: Math.round(
+                    Math.max(minHeight, Math.min(naturalHeight, maxHeight)))
+
                 visible: thinkingCheck.checked
                 color: Kirigami.Theme.alternateBackgroundColor
                 radius: Kirigami.Units.smallSpacing
 
                 Flickable {
+                    id: thinkingFlick
                     anchors.fill: parent
                     anchors.margins: messageItem.bubblePadding
                     contentWidth: width
                     contentHeight: thinkingText.implicitHeight
                     clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                        // Without this there is no indication that a capped
+                        // block continues past the fold.
+                        policy: thinkingFlick.contentHeight > thinkingFlick.height
+                                ? QQC2.ScrollBar.AlwaysOn : QQC2.ScrollBar.AlwaysOff
+                    }
 
                     PlasmaComponents.Label {
                         id: thinkingText
-                        width: parent.width
+                        // Bound to the Flickable by id, NOT to `parent`: a
+                        // Flickable reparents its children onto an internal
+                        // contentItem, so `parent.width` here is not the usable
+                        // text width. That is what collapsed the drawer.
+                        width: thinkingFlick.width
                         text: thinking
                         wrapMode: Text.Wrap
                         font.family: root.thoughtsFontFamily
@@ -596,13 +649,7 @@ Kirigami.AbstractCard {
                                 radius: 4
                             }
 
-                            Keys.onEscapePressed: function(event) {
-                                event.accepted = true;
-                                messageItem.isEditing = false;
-                                messageItem.editDraft = "";
-                            }
-
-                            Keys.onReturnPressed: function(event) {
+                            function submitEdit(event) {
                                 if (event.modifiers & Qt.ControlModifier) {
                                     event.accepted = true;
                                     if (messageItem.isUser) {
@@ -615,6 +662,20 @@ Kirigami.AbstractCard {
                                 } else {
                                     event.accepted = false; // allow multiline newline
                                 }
+                            }
+
+                            Keys.onEscapePressed: function(event) {
+                                event.accepted = true;
+                                messageItem.isEditing = false;
+                                messageItem.editDraft = "";
+                            }
+
+                            Keys.onReturnPressed: function(event) {
+                                submitEdit(event);
+                            }
+
+                            Keys.onEnterPressed: function(event) {
+                                submitEdit(event);
                             }
                         }
                     }
@@ -754,8 +815,63 @@ Kirigami.AbstractCard {
 
         Loader {
             visible: isToolRunning || isToolResult
-            Layout.fillWidth: true
-            sourceComponent: toolResultBlockComponent
+            Layout.fillWidth: !(isSkillLoadedChip || (toolCollapsibleResult && !toolResultExpanded))
+            sourceComponent: (isSkillLoadedChip || (toolCollapsibleResult && !toolResultExpanded)) ? toolPillComponent : toolResultBlockComponent
+        }
+
+        // Compact FYI pill: skill loads ("Loaded x skill") and collapsed tool
+        // results (click to expand). Full details stay one click away.
+        Component {
+            id: toolPillComponent
+            Rectangle {
+                id: pill
+                radius: height / 2
+                color: Kirigami.Theme.alternateBackgroundColor
+                border.color: Kirigami.Theme.disabledTextColor
+                border.width: 1
+                readonly property real pillPad: (Plasmoid.configuration.chatSpacing || 0) / 2
+                implicitWidth: pillRow.implicitWidth + Kirigami.Units.largeSpacing + pillPad
+                implicitHeight: pillRow.implicitHeight + Kirigami.Units.smallSpacing + pillPad
+                width: implicitWidth
+                height: implicitHeight
+
+                HoverHandler {
+                    id: pillHover
+                    cursorShape: Qt.PointingHandCursor
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    enabled: !messageItem.isSkillLoadedChip
+                    onClicked: messageItem.toolResultExpanded = true
+                }
+
+                PlasmaComponents.ToolTip.text: messageItem.isSkillLoadedChip
+                    ? i18n("The model loaded this skill's instructions into context before acting.")
+                    : messageItem.toolPillText
+                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+                PlasmaComponents.ToolTip.visible: pillHover.hovered
+
+                RowLayout {
+                    id: pillRow
+                    anchors.centerIn: parent
+                    spacing: Kirigami.Units.smallSpacing
+
+                    Kirigami.Icon {
+                        source: ToolManager.toolIconName(messageItem.isSkillLoadedChip ? "skill" : messageItem.toolName)
+                        Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                        Layout.preferredHeight: Kirigami.Units.iconSizes.small
+                    }
+
+                    PlasmaComponents.Label {
+                        text: messageItem.toolPillText
+                        font: Kirigami.Theme.smallFont
+                        color: Kirigami.Theme.disabledTextColor
+                        elide: Text.ElideMiddle
+                        Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+                    }
+                }
+            }
         }
 
         Component {
@@ -770,6 +886,8 @@ Kirigami.AbstractCard {
                 sessionMode: messageItem.sessionMode
                 sessionLabel: messageItem.sessionLabel
                 attachmentPaths: messageItem.attachmentPaths
+                collapsible: messageItem.toolCollapsibleResult
+                onCollapseRequested: messageItem.toolResultExpanded = false
                 onTerminalRequested: cmd => messageItem.terminalRequested(cmd)
                 onStopRequested: cmd => messageItem.stopRequested(cmd, "")
             }
@@ -865,11 +983,22 @@ Kirigami.AbstractCard {
             id: genericFileComponent
             Kirigami.Chip {
                 id: chipItem
+                readonly property string filePath: parent ? (parent.filePath || "") : ""
                 readonly property string fileName: parent ? (parent.fileName || "") : ""
                 text: fileName
-                icon.name: "document-export"
+                icon.name: Api.iconForFile(filePath)
                 closable: false
                 checkable: false
+                hoverEnabled: true
+                onClicked: {
+                    if (filePath.length > 0 && !filePath.startsWith("data:")) {
+                        Qt.openUrlExternally("file://" + filePath);
+                    }
+                }
+
+                PlasmaComponents.ToolTip.text: filePath
+                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+                PlasmaComponents.ToolTip.visible: hovered && filePath !== ""
             }
         }
     }

@@ -92,14 +92,20 @@ PlasmaExtras.Representation {
         return named[key] || "";
     }
 
+    function isModifierKey(key) {
+        return key === Qt.Key_Control || key === Qt.Key_Shift
+            || key === Qt.Key_Alt || key === Qt.Key_Meta
+            || key === Qt.Key_AltGr || key === Qt.Key_Super_L
+            || key === Qt.Key_Super_R || key === Qt.Key_Hyper_L
+            || key === Qt.Key_Hyper_R;
+    }
+
     function _seqFromKeyEvent(event) {
         var keyName = _keyNameFromEvent(event.key);
         if (!keyName)
             return "";
         // Ignore pure modifier key events
-        if (event.key === Qt.Key_Control || event.key === Qt.Key_Shift
-                || event.key === Qt.Key_Alt || event.key === Qt.Key_Meta
-                || event.key === Qt.Key_AltGr)
+        if (isModifierKey(event.key))
             return "";
         var parts = [];
         if (event.modifiers & Qt.MetaModifier) parts.push("meta");
@@ -136,9 +142,7 @@ PlasmaExtras.Representation {
             return keyName === wantKey;
         }
         // Or a required modifier released while holding (end PTT early)
-        if (event.key === Qt.Key_Control || event.key === Qt.Key_Shift
-                || event.key === Qt.Key_Alt || event.key === Qt.Key_Meta
-                || event.key === Qt.Key_AltGr) {
+        if (isModifierKey(event.key)) {
             return true;
         }
         return false;
@@ -258,6 +262,7 @@ PlasmaExtras.Representation {
             { cmd: "/profile",  desc: i18n("Switch profile (/profile <name>)") },
             { cmd: "/save",     desc: i18n("Save chat to file") },
             { cmd: "/settings", desc: i18n("Open settings") },
+            { cmd: "/skills",   desc: i18n("List discovered skills and their status") },
             { cmd: "/task",     desc: i18n("Run a saved task (/task <name>)") }
         ];
         if (root.isDriverServiceActive) {
@@ -403,14 +408,17 @@ PlasmaExtras.Representation {
 
             PlasmaComponents.ToolButton {
                 id: driveToolButton
-                icon.name: "input-mouse"
+                icon.name: root.isDrivingPending ? "view-refresh" : "input-mouse"
                 visible: Plasmoid.configuration.enableDesktopAutomation && root.isDriverServiceActive
                 checkable: true
                 checked: root.isDrivingActive
+                opacity: root.isDrivingPending ? 0.5 : 1.0
                 Accessible.name: i18n("Drive Desktop")
-                PlasmaComponents.ToolTip.text: root.isDrivingActive 
-                    ? i18n("Stop Driving Desktop (disconnect)") 
-                    : i18n("Drive Desktop (starts handshake and enables auto mode)")
+                PlasmaComponents.ToolTip.text: root.isDrivingActive
+                    ? i18n("Stop Driving Desktop (disconnect)")
+                    : (root.isDrivingPending
+                        ? i18n("Waiting for desktop automation consent…")
+                        : i18n("Drive Desktop (starts handshake and enables auto mode)"))
                 PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
                 PlasmaComponents.ToolTip.visible: hovered && PlasmaComponents.ToolTip.text !== ""
                 onClicked: {
@@ -949,16 +957,6 @@ PlasmaExtras.Representation {
     contentItem: Item {
         id: representationContent
 
-        MouseArea {
-            anchors.fill: parent
-            z: 99
-            propagateComposedEvents: true
-            onPressed: function(mouse) {
-                Plasmoid.status = PlasmaCore.Types.AcceptingInputStatus;
-                mouse.accepted = false;
-            }
-        }
-
         ColumnLayout {
             anchors.fill: parent
             spacing: Plasmoid.configuration.chatSpacing
@@ -1004,27 +1002,76 @@ PlasmaExtras.Representation {
                 cacheBuffer: height * 2
                 reuseItems: true
 
-                // Track whether user is near the bottom to avoid fighting manual scrolling.
-                // nearBottomThreshold gives some slack so small upward scrolls still
-                // count as "sticky" — atYEnd alone has effectively zero tolerance.
-                readonly property real nearBottomThreshold: Kirigami.Units.gridUnit * 8
-                readonly property bool atBottom: atYEnd || contentHeight <= height ||
-                                                 (contentHeight - contentY - height) <= nearBottomThreshold
-                // Latched true when streaming begins at bottom; cleared when streaming ends or user scrolls away
-                property bool trackingStream: false
-                // Latched true while user is pinned to the bottom; cleared on manual scroll-away, re-latched on returning to end
-                property bool stickToBottom: true
-                // Set while we're issuing a programmatic scroll so the resulting
-                // movementStarted/contentY updates don't get mistaken for user input
-                property bool programmaticScroll: false
+                // ---- Follow policy -------------------------------------------------
+                // One bit decides everything: followOutput.
+                //   - set:   user returns to the very bottom (wheel/drag) or presses
+                //            the go-down button
+                //   - clear: user wheels/drags away from the bottom, or a finished
+                //            response parks the view at its top for reading
+                // Every content signal funnels into scrollToBottom(), which no-ops
+                // when the bit is off. User intent is captured at the source
+                // (WheelHandler / movement events) — never inferred from
+                // contentYChanged, so programmatic jumps can never be misread as
+                // user input and vice versa.
+                property bool followOutput: true
+                // A drag/flick/scrollbar gesture is in progress; jumps pause until
+                // it ends (movementEnded re-derives followOutput from position).
+                property bool dragging: false
+                // Coalesces queued jumps: one deferred scrollToBottom per event-loop
+                // pass, however many signals fired in that pass.
+                property bool _jumpQueued: false
 
-                function scrollToEnd() {
-                    programmaticScroll = true;
-                    positionViewAtEnd();
-                    // Hold the guard across the next event-loop tick so the
-                    // contentYChanged signals that arrive after the layout
-                    // settles aren't misread as user input.
-                    Qt.callLater(function() { messageList.programmaticScroll = false; });
+                function scrollToBottom() {
+                    if (_jumpQueued) return;
+                    _jumpQueued = true;
+                    // Defer outside signal handlers: runs after layout has had a
+                    // chance to settle, and keeps forceLayout() out of
+                    // layout-driven signal handlers (reentrancy hazard).
+                    Qt.callLater(function() {
+                        _jumpQueued = false;
+                        if (!messageList.followOutput || messageList.dragging) return;
+                        // Streaming pin exception: while a streamed response grows
+                        // taller than the viewport, hold its first line in view
+                        // instead of tailing its end.
+                        if (root.isLoading && root.streamingMessageIndex >= 0) {
+                            var item = messageList.itemAtIndex(root.streamingMessageIndex);
+                            if (item && item.height > messageList.height) {
+                                messageList.positionViewAtIndex(root.streamingMessageIndex, ListView.Beginning);
+                                return;
+                            }
+                        }
+                        forceLayout();
+                        positionViewAtEnd();
+                    });
+                }
+
+                // Observe-only wheel listener. Mouse-wheel scrolling does not emit
+                // movementStarted — this is how we know real input happened without
+                // touching contentYChanged. target:null keeps the handler from
+                // acting on the event; blocking:false lets it propagate so the
+                // Flickable still scrolls natively.
+                WheelHandler {
+                    target: null
+                    blocking: false
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: function(event) {
+                        var up = event.angleDelta.y > 0;
+                        Qt.callLater(function() {
+                            // Evaluate after Flickable applied the scroll.
+                            if (!messageList)
+                                return;
+                            if (up && !messageList.atYEnd)
+                                messageList.followOutput = false;
+                            else if (messageList.atYEnd)
+                                messageList.followOutput = true;
+                        });
+                    }
+                }
+
+                onMovementStarted: dragging = true
+                onMovementEnded: {
+                    dragging = false;
+                    followOutput = atYEnd;
                 }
 
                 delegate: ChatMessage {
@@ -1057,9 +1104,7 @@ PlasmaExtras.Representation {
                     sessionLabel: root.sessionChipText()
                     commandRunStateTick: root.commandRunStateTick
                     onScrollRequested: {
-                        messageList.programmaticScroll = true;
                         messageList.positionViewAtIndex(index, ListView.Beginning);
-                        Qt.callLater(function() { messageList.programmaticScroll = false; });
                     }
                     onShareRequested: function(index) { root.shareOutput(index); }
                     onRetryRequested: function(msgIndex) { root.retryFromMessage(msgIndex); }
@@ -1083,78 +1128,51 @@ PlasmaExtras.Representation {
                     }
                 }
 
-                // movementStarted fires for wheel, scrollbar drag, and touch flicks —
-                // unlike onFlickStarted which only fires for touch/drag flicks. Guard
-                // against the programmatic scrolls we issue ourselves.
-                // Mouse-wheel scrolling on this Flickable does NOT emit
-                // movementStarted, but it DOES emit contentYChanged. Use that
-                // as the user-input signal: any non-programmatic contentY
-                // change re-derives stickToBottom from the new position.
-                onContentYChanged: {
-                    if (programmaticScroll) return;
-                    trackingStream = false;
-                    stickToBottom = atBottom;
-                }
+                // Content triggers: every append, mutation, and height change
+                // funnels into the same queued jump. Settle jitter and clamp-backs
+                // just re-request it — convergence needs no suppression logic.
+                onCountChanged: scrollToBottom()
 
-                onCountChanged: {
-                    var wasAtBottom = messageList.atBottom || root.isAutoMode || messageList.trackingStream || messageList.stickToBottom;
-                    if (wasAtBottom && root.isLoading && root.streamingMessageIndex >= 0) {
-                        trackingStream = true;
-                    }
-                    if (wasAtBottom) {
-                        stickToBottom = true;
-                        Qt.callLater(messageList.scrollToEnd);
-                    }
-                }
-
-                onContentHeightChanged: {
-
-                    if (programmaticScroll) return;
-                    if (atBottom) return;
-                    if (!stickToBottom && !(root.isLoading && trackingStream)) return;
-                    if (root.isLoading && root.streamingMessageIndex >= 0) {
-                        var item = messageList.itemAtIndex(root.streamingMessageIndex);
-                        if (item && item.height > messageList.height) {
-                            programmaticScroll = true;
-                            messageList.positionViewAtIndex(root.streamingMessageIndex, ListView.Beginning);
-                            Qt.callLater(function() { messageList.programmaticScroll = false; });
-                            return;
-                        }
-                    }
-                    scrollToEnd();
-                }
+                onContentHeightChanged: scrollToBottom()
 
                 Connections {
                     target: root
                     function onExpandedChanged() {
+                        if (!root.expanded && fullRep._voiceKeyPressActive) {
+                            fullRep.handleVoiceKeyCanceled();
+                        }
                         if (root.expanded) {
+                            Plasmoid.status = PlasmaCore.Types.AcceptingInputStatus;
                             if (fullRep.Window.window) {
                                 fullRep.Window.window.requestActivate();
                             }
                             inputField.forceActiveFocus(Qt.ShortcutFocusReason);
+                            Qt.callLater(function() {
+                                if (root.expanded && inputField.enabled) {
+                                    inputField.forceActiveFocus(Qt.ShortcutFocusReason);
+                                }
+                            });
                         }
                     }
                 }
 
                 Connections {
                     target: root
+                    function onChatContentChanged() {
+                        messageList.scrollToBottom();
+                    }
                     function onResponseReady(messageIndex) {
-                        messageList.trackingStream = false;
                         Qt.callLater(function() {
-                            if (root.isAutoMode && messageList.atBottom) {
-                                messageList.scrollToEnd();
-                                messageList.stickToBottom = true;
-                                return;
-                            }
+                            if (!messageList.followOutput || messageList.dragging) return;
                             var item = messageList.itemAtIndex(messageIndex);
-                            if (item && item.height <= messageList.height) {
-                                messageList.scrollToEnd();
-                                messageList.stickToBottom = true;
-                            } else {
-                                messageList.programmaticScroll = true;
+                            if (item && item.height > messageList.height) {
+                                // Tall finished response: park it at its first line
+                                // for reading and pause following until the user
+                                // returns to the bottom (or presses go-down).
+                                messageList.followOutput = false;
                                 messageList.positionViewAtIndex(messageIndex, ListView.Beginning);
-                                messageList.programmaticScroll = false;
-                                messageList.stickToBottom = false;
+                            } else {
+                                messageList.scrollToBottom();
                             }
                         });
                     }
@@ -1174,12 +1192,15 @@ PlasmaExtras.Representation {
                 anchors.horizontalCenter: parent.horizontalCenter
                 anchors.bottom: parent.bottom
                 anchors.bottomMargin: Kirigami.Units.smallSpacing
-                visible: !messageList.atBottom && messageList.count > 0 && !root.isLoading
+                visible: !messageList.followOutput && !messageList.atYEnd && messageList.count > 0
                 icon.name: "go-down"
                 icon.width: Kirigami.Units.iconSizes.small
                 icon.height: Kirigami.Units.iconSizes.small
                 z: 1
-                onClicked: messageList.scrollToEnd()
+                onClicked: {
+                    messageList.followOutput = true;
+                    messageList.scrollToBottom();
+                }
 
                 background: Rectangle {
                     radius: width / 2
@@ -1316,6 +1337,49 @@ PlasmaExtras.Representation {
                         focus: true
                         wrapMode: Text.Wrap
                         
+                        Component.onCompleted: {
+                            if (root.expanded && enabled) {
+                                forceActiveFocus(Qt.ShortcutFocusReason);
+                            }
+                        }
+
+                        onEnabledChanged: {
+                            if (root.expanded && enabled && !activeFocus) {
+                                forceActiveFocus(Qt.ShortcutFocusReason);
+                            }
+                        }
+
+                        onActiveFocusChanged: {
+                            if (!activeFocus && fullRep._voiceKeyPressActive) {
+                                fullRep.handleVoiceKeyCanceled();
+                            }
+                        }
+
+                        function submitMessage(event) {
+                            if (event.modifiers & Qt.ShiftModifier) {
+                                event.accepted = false;
+                            } else {
+                                event.accepted = true;
+                                var sendText = text.trim();
+                                if (sendText.toLowerCase().startsWith("/task ") && taskPopup.filteredTasks.length === 1) {
+                                    sendText = "/task " + taskPopup.filteredTasks[0].name;
+                                } else if (sendText.toLowerCase().startsWith("/model ") && modelPopup.filteredModels.length === 1) {
+                                    sendText = "/model " + modelPopup.filteredModels[0];
+                                } else if (sendText.toLowerCase().startsWith("/profile ") && profilePopup.filteredProfiles.length === 1) {
+                                    sendText = "/profile " + profilePopup.filteredProfiles[0].name;
+                                } else if (sendText.startsWith("/") && sendText.indexOf(" ") === -1 &&
+                                        slashPopup.filteredSlashCommands.length === 1) {
+                                    sendText = slashPopup.filteredSlashCommands[0].cmd;
+                                }
+                                if (sendText.length > 0 || root.pendingAttachments.length > 0) {
+                                    if (root.sendMessage(sendText, root.pendingAttachments)) {
+                                        text = "";
+                                        root.pendingAttachments = [];
+                                    }
+                                }
+                            }
+                        }
+
                         Keys.onPressed: function(event) {
                             // Voice hotkey (same hold/toggle/auto as mic) — steal chord before typing.
                             if (fullRep.voiceKeyPressMatches(event)) {
@@ -1351,7 +1415,9 @@ PlasmaExtras.Representation {
 
                         Keys.onReleased: function(event) {
                             if (fullRep.voiceKeyReleaseMatches(event)) {
-                                event.accepted = true;
+                                if (!fullRep.isModifierKey(event.key)) {
+                                    event.accepted = true;
+                                }
                                 fullRep.handleVoiceKeyReleased(event);
                             }
                         }
@@ -1380,28 +1446,11 @@ PlasmaExtras.Representation {
                         }
 
                         Keys.onReturnPressed: function(event) {
-                            if (event.modifiers & Qt.ShiftModifier) {
-                                event.accepted = false;
-                            } else {
-                                event.accepted = true;
-                                var sendText = text.trim();
-                                if (sendText.toLowerCase().startsWith("/task ") && taskPopup.filteredTasks.length === 1) {
-                                    sendText = "/task " + taskPopup.filteredTasks[0].name;
-                                } else if (sendText.toLowerCase().startsWith("/model ") && modelPopup.filteredModels.length === 1) {
-                                    sendText = "/model " + modelPopup.filteredModels[0];
-                                } else if (sendText.toLowerCase().startsWith("/profile ") && profilePopup.filteredProfiles.length === 1) {
-                                    sendText = "/profile " + profilePopup.filteredProfiles[0].name;
-                                } else if (sendText.startsWith("/") && sendText.indexOf(" ") === -1 &&
-                                        slashPopup.filteredSlashCommands.length === 1) {
-                                    sendText = slashPopup.filteredSlashCommands[0].cmd;
-                                }
-                                if (sendText.length > 0 || root.pendingAttachments.length > 0) {
-                                    if (root.sendMessage(sendText, root.pendingAttachments)) {
-                                        text = "";
-                                        root.pendingAttachments = [];
-                                    }
-                                }
-                            }
+                            inputField.submitMessage(event);
+                        }
+
+                        Keys.onEnterPressed: function(event) {
+                            inputField.submitMessage(event);
                         }
                     }
                 }
@@ -1798,31 +1847,6 @@ PlasmaExtras.Representation {
                         }
                         // Do not start toggle on cancel
                         micButton._pttArmed = false;
-                    }
-                }
-            }
-
-            PlasmaComponents.Button {
-                id: killButton
-                text: i18n("Kill")
-                visible: Plasmoid.configuration.useSessionMultiplexer
-                enabled: root.systemPromptReady && root.sessionActive
-                onClicked: root.resetSession()
-                PlasmaComponents.ToolTip.text: i18n("Kill persistent session (stops all processes and resets shell state)")
-                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
-                PlasmaComponents.ToolTip.visible: hovered && PlasmaComponents.ToolTip.text !== ""
-
-                contentItem: RowLayout {
-                    spacing: Kirigami.Units.smallSpacing
-                    Kirigami.Icon {
-                        source: "media-playback-stop"
-                        implicitWidth: Kirigami.Units.iconSizes.small
-                        implicitHeight: Kirigami.Units.iconSizes.small
-                        color: killButton.enabled ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
-                    }
-                    PlasmaComponents.Label {
-                        text: killButton.text
-                        color: killButton.enabled ? Kirigami.Theme.negativeTextColor : Kirigami.Theme.disabledTextColor
                     }
                 }
             }

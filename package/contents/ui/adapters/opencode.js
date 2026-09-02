@@ -3,111 +3,87 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
-// OpenCode Go adapter (https://opencode.ai/docs/go/).
+// OpenCode Zen / Go gateway adapter. One apiType, two presets. Each model
+// speaks a native protocol (Responses, chat completions, Anthropic messages,
+// or Gemini generateContent); this module routes to the existing adapters
+// after rewriting URLs/headers via opts.opencodeAuth.
 //
-// OpenCode Go is a single subscription fronting a curated set of coding models
-// (GLM, Kimi, DeepSeek, MiniMax, Qwen, MiMo, Grok, GPT Luna). It is a gateway,
-// not a model host: requests are forwarded to whichever upstream actually owns
-// the model, so errors surface in the *upstream's* dialect and the set of
-// models reachable on a given wire format changes over time.
+// Protocol selection lives in ../opencodeRoute.js — pure, no QML or network,
+// covered by tests/opencode_route.mjs. It maps from the official endpoint
+// tables (https://opencode.ai/docs/zen/, https://opencode.ai/docs/go) with
+// prefix fallbacks for newly listed siblings.
 //
-// Three wire formats are served from the same account and the same key:
-//   OpenAI chat  https://opencode.ai/zen/go/v1/chat/completions  (Bearer)
-//   Anthropic    https://opencode.ai/zen/go/v1/messages          (x-api-key)
-//   OpenAI resp  https://opencode.ai/zen/go/v1/responses         (Bearer)
-//
-// A model is generally reachable on exactly one of them, and picking wrong
-// fails at the endpoint level rather than degrading. This adapter routes by
-// model, and on an endpoint-level rejection with no output retries on the
-// remaining formats, remembering what worked for the rest of the session.
+// Those tables go stale: OpenCode reshuffles which backend serves a model
+// without notice, and a wrong guess fails at the endpoint level rather than
+// degrading. So a request rejected at the endpoint level retries on the
+// remaining formats and remembers what worked for the session. See RETRY
+// SCOPE below for how that stays hub-and-spoke rather than N×M.
 
 .import "openai_chat.js" as Chat
-.import "anthropic.js" as Anthropic
 .import "openai_responses.js" as Responses
+.import "anthropic.js" as Anthropic
+.import "gemini.js" as Gemini
+.import "../opencodeRoute.js" as Route
 
 var id = "opencode";
-var displayName = "OpenCode Go";
+var displayName = "OpenCode";
 
-// The OpenAI-format base. The Anthropic strategy appends "/v1/messages" itself,
-// so it is handed the parent path instead.
-var OPENAI_BASE = "https://opencode.ai/zen/go/v1";
-var ANTHROPIC_BASE = "https://opencode.ai/zen/go";
+var ZEN_BASE = "https://opencode.ai/zen/v1";
+var GO_BASE = "https://opencode.ai/zen/go/v1";
 var CONSOLE_URL = "https://opencode.ai/auth";
 
 var presets = [
-    { name: "OpenCode Go", url: OPENAI_BASE }
+    { name: "OpenCode Zen", url: ZEN_BASE },
+    { name: "OpenCode Go",  url: GO_BASE }
 ];
 
 var capabilities = {
     providerPresets: true,
     customEndpoint: true,
     reasoningEffort: true,
-    thinkingBudget: false,
+    thinkingBudget: true,
     fetchModels: true,
-    reasoningHelp: "OpenCode Go serves reasoning models (GLM, DeepSeek, Kimi, MiniMax) over chat completions; thoughts arrive as reasoning_content and are shown when effort is not Off."
+    reasoningHelp: "OpenCode routes each model to its native API (Responses, chat completions, Anthropic, or Gemini). Reasoning effort and thinking budget apply when the selected model supports them."
 };
 
-// The model list is public — no key required — so the settings page can populate
-// the dropdown before the user has pasted anything.
+// The model list is public — no key required — so the settings page can
+// populate the dropdown before the user has pasted anything.
 var publicModelList = true;
 
-// Routing, measured against the live gateway (2026-08-17: all 26 advertised
-// models on chat/completions and messages, a subset on responses) and checked
-// against the endpoint tables in the OpenCode Go docs:
+// RETRY SCOPE.
 //
-//   chat + messages   minimax-m3 / m2.7 / m2.5, kimi-k3
-//   chat only         glm-5 / 5.1 / 5.2 / 5.3, kimi-k2.5 / k2.6 / k2.7-code,
-//                     mimo-v2.5 / v2.5-pro, hy3
-//   messages only     every qwen3.x (-plus and -max alike) -> HTTP 503
-//                     "Endpoint is unavailable." on chat/completions
-//   responses         grok-4.5, gpt-5.6-luna
-//   unreachable       deepseek-v4-* (403 RegionError, China-hosted opt-in),
-//                     mimo-v2-pro / v2-omni (deprecated upstream), hy3-preview
+// Every format is retryable, because the payload is always built in one
+// neutral shape and converted at send time.
 //
-// The formats are not strictly partitioned — glm-5.3 answers on responses too —
-// so routing is by model rather than by probing for whatever replies.
+// The alternative — letting buildTools/buildContentArray emit the *target*
+// protocol's shape at compose time — is what would force an N×M problem: a
+// body already built as Anthropic blocks cannot be re-sent as Gemini parts
+// without a translator for every ordered pair. Building neutrally instead
+// makes this hub-and-spoke: one converter per protocol, three in total.
 //
-// gpt-5.6-luna answers on chat/completions as well, but is routed to responses
-// deliberately. On chat/completions the gateway shims its Responses output into
-// chat deltas, and the shim is lossy: tool-call ids arrive as "fc_tmp_..."
-// (a Responses function-call item id) and both parallel calls land on delta
-// index 0, which is what corrupts the arguments string. Streamed natively from
-// /responses the same prompt yields two clean items on output_index 0 and 1,
-// each with its own id and its own arguments delta. Routing here removes the
-// cause; toolCallNormalizer still covers the symptom.
+// Chat shape is the hub, and it is a lossless one — openai_chat.js's
+// buildContentArray keeps an attachment's data URL whole and inlines text
+// attachments as text parts, so it carries everything the other builders
+// carry. Everything past the content array is already neutral: anthropic.js,
+// gemini.js and openai_responses.js each expose translateMessages(neutral),
+// which handles roles, tool calls, tool results and thinking blocks from the
+// OpenAI shape. Only the tools array and the user content parts ever needed
+// converting, which is why the spoke count is small.
 //
-// Qwen is a whole-family prefix rule, so a new qwen3.9-plus routes correctly on
-// day one. Everything else defaults to chat/completions and self-corrects
-// through the runtime fallback below as OpenCode reshuffles its backends.
-var MODEL_FORMATS = {
-    "grok-4.5": "responses",
-    "gpt-5.6-luna": "responses"
-};
+// The static route still picks the *first* attempt, so a high-confidence
+// prefix match costs no extra round trip. It just no longer dead-ends when
+// OpenCode moves that model to another backend.
+//
+// Discipline that is not about shape stays: retry only on an endpoint-level
+// rejection (looksLikeWrongEndpoint), never after partial output, and never
+// the same format twice.
+var FALLBACK_ORDER = ["chat", "anthropic", "responses", "gemini"];
 
-var MODEL_PREFIX_FORMATS = [
-    { prefix: "qwen", format: "anthropic" }
-];
-
-// Order the runtime fallback walks when the routed format rejects the request
-// at the endpoint level. chat/completions serves the most models, so it is
-// tried first among the alternatives.
-var FALLBACK_ORDER = ["openai", "anthropic", "responses"];
-
-// Session-scoped learning from actual responses.
+// Session-scoped learning, keyed by model. Every payload is built in the same
+// neutral shape, so a learned value is valid for any route. Never consulted by
+// buildTools/buildContentArray — those must stay neutral, and letting a learned
+// value change the built shape would defeat the conversion path.
 var learnedFormats = {};
-
-function formatFor(model) {
-    if (!model) return "openai";
-    if (learnedFormats[model]) return learnedFormats[model];
-    if (MODEL_FORMATS[model]) return MODEL_FORMATS[model];
-    var lower = String(model).toLowerCase();
-    for (var i = 0; i < MODEL_PREFIX_FORMATS.length; i++) {
-        if (lower.indexOf(MODEL_PREFIX_FORMATS[i].prefix) === 0) {
-            return MODEL_PREFIX_FORMATS[i].format;
-        }
-    }
-    return "openai";
-}
 
 function _shallowCopy(obj) {
     var out = {};
@@ -118,25 +94,69 @@ function _shallowCopy(obj) {
     return out;
 }
 
+function productFromOpts(opts) {
+    return Route.productFromEndpoint(
+        opts && opts.endpoint,
+        opts && opts.providerName
+    );
+}
+
+// The static, build-time protocol. Deliberately ignores learnedFormats.
+function protocolFor(opts, model) {
+    var mid = model;
+    if (mid === undefined || mid === null)
+        mid = opts && opts.model;
+    return Route.resolveProtocol(productFromOpts(opts), mid);
+}
+
+function copyOpts(opts, extra) {
+    var o = _shallowCopy(opts);
+    var k;
+    o.opencodeAuth = true;
+    if (extra) {
+        for (k in extra) {
+            if (extra.hasOwnProperty(k))
+                o[k] = extra[k];
+        }
+    }
+    return o;
+}
+
+// Always read the canonical list for the selected product; a stale custom
+// endpoint would otherwise advertise models this account cannot reach.
+function canonicalBase(endpoint, opts) {
+    var product = Route.productFromEndpoint(
+        (opts && opts.endpoint) || endpoint,
+        opts && opts.providerName
+    );
+    return product === "go" ? GO_BASE : ZEN_BASE;
+}
+
 function fetchModels(endpoint, apiKey, opts, callback) {
     if (typeof opts === "function") {
         callback = opts;
         opts = null;
     }
-    // Always read the canonical list; a stale custom endpoint would otherwise
-    // return models this account cannot reach.
-    return Chat.fetchModels(OPENAI_BASE, apiKey, callback);
+    return Chat.fetchModels(canonicalBase(endpoint, opts), apiKey, callback);
 }
 
+// Tools and content are always built in the neutral chat shape; sendStreaming
+// converts to whichever protocol it is actually attempting. See RETRY SCOPE —
+// building per-protocol here is what would make a retry impossible.
 function buildTools(options) {
-    // Built in OpenAI shape unconditionally; converted per-request when a model
-    // turns out to need the Anthropic format.
-    return Chat.buildTools(options);
+    return Chat.buildTools(copyOpts(options));
 }
 
-function buildContentArray(text, attachments) {
+// `extra` carries {model, endpoint, providerName} from api.js. It is no longer
+// consulted — the shape is neutral regardless of route — but the parameter
+// stays because api.js passes it positionally for this apiType.
+function buildContentArray(text, attachments, extra) {
     return Chat.buildContentArray(text, attachments);
 }
+
+// ---------------------------------------------------------------------------
+// chat-shape -> other-protocol converters, used only on the retry path.
+// ---------------------------------------------------------------------------
 
 // OpenAI {type,function:{name,description,parameters}} -> Anthropic
 // {name,description,input_schema}.
@@ -175,9 +195,30 @@ function toResponsesTools(tools) {
     return out;
 }
 
+// OpenAI chat {type,function:{name,description,parameters}} -> Gemini's single
+// functionDeclarations wrapper. Gemini takes one tool object holding every
+// declaration, not one object per function, so an empty set is [] rather than
+// a wrapper around nothing.
+function toGeminiTools(tools) {
+    var fns = [];
+    if (!tools) return fns;
+    for (var i = 0; i < tools.length; i++) {
+        var t = tools[i];
+        var fn = t && t["function"];
+        if (!fn || !fn.name) continue;
+        fns.push({
+            name: fn.name,
+            description: fn.description || "",
+            parameters: fn.parameters || { type: "object", properties: {} }
+        });
+    }
+    if (fns.length === 0) return [];
+    return [{ functionDeclarations: fns }];
+}
+
 // The Responses strategy's translateMessages passes an array content through
-// verbatim, because openai.js hands it parts that were already built in
-// Responses shape. Here they are always built in chat shape, so convert:
+// verbatim, because it is normally handed parts already built in Responses
+// shape. On the retry path they were built in chat shape, so convert:
 // text -> input_text, image_url -> input_image (a bare URL string, not an
 // object). Applies to tool results too — translateMessages reads their text
 // from parts typed input_text.
@@ -198,14 +239,20 @@ function convertContentForResponses(content) {
     return out;
 }
 
-function convertMessagesForResponses(messages) {
+// The three converters differ only in how they map one content part, so the
+// message walk itself is shared. String content (the common case, and every
+// tool result) is passed through — each translateMessages already accepts it.
+// Thinking blocks ride along untouched: their signature fields are read by
+// name (`signature` for Anthropic, `thoughtSignature` for Gemini), so one
+// protocol's signatures are ignored rather than rejected by another.
+function mapMessageContent(messages, convertContent) {
     if (!messages) return messages;
     var out = [];
     for (var i = 0; i < messages.length; i++) {
         var m = messages[i];
         if (m && Array.isArray(m.content)) {
             var copy = _shallowCopy(m);
-            copy.content = convertContentForResponses(m.content);
+            copy.content = convertContent(m.content);
             out.push(copy);
         } else {
             out.push(m);
@@ -214,11 +261,13 @@ function convertMessagesForResponses(messages) {
     return out;
 }
 
-// Content parts are built in OpenAI shape (buildContentArray delegates to the
-// chat strategy, and it has no idea which model the turn will use). Text blocks
-// are identical across both APIs, but images are not: OpenAI carries a data URL
-// in image_url, Anthropic wants a split base64 source block. Convert on the way
-// out so attachments survive a request routed to /messages.
+function convertMessagesForResponses(messages) {
+    return mapMessageContent(messages, convertContentForResponses);
+}
+
+// Text blocks are identical across both APIs, but images are not: OpenAI
+// carries a data URL in image_url, Anthropic wants a split base64 source
+// block. Convert on the way out so attachments survive a retry onto /messages.
 function convertContentForAnthropic(content) {
     if (!Array.isArray(content)) return content;
     var out = [];
@@ -226,12 +275,16 @@ function convertContentForAnthropic(content) {
         var part = content[i];
         if (part && part.type === "image_url" && part.image_url && typeof part.image_url.url === "string") {
             var m = /^data:([^;]+);base64,(.*)$/.exec(part.image_url.url);
-            if (m) {
+            // Mirror anthropic.js's own isImageMime guard. /messages accepts an
+            // image block only for image/* — a PDF data URL sent as one is
+            // rejected outright. Gemini and Responses have no such restriction,
+            // which is why only this converter filters on mime.
+            if (m && m[1].indexOf("image/") === 0) {
                 out.push({ type: "image", source: { type: "base64", media_type: m[1], data: m[2] } });
                 continue;
             }
-            // A non-data URL cannot be inlined; drop it rather than send a block
-            // the Messages API will reject outright.
+            // A non-data URL cannot be inlined either; drop rather than send a
+            // block the Messages API will reject.
             continue;
         }
         out.push(part);
@@ -240,20 +293,43 @@ function convertContentForAnthropic(content) {
 }
 
 function convertMessagesForAnthropic(messages) {
-    if (!messages) return messages;
+    return mapMessageContent(messages, convertContentForAnthropic);
+}
+
+// Gemini parts are untyped: text is {text}, an inline image is {inlineData}.
+// gemini.js's toParts() passes an array straight through — it assumes anything
+// array-shaped already came from its own buildContentArray — so the conversion
+// has to happen here or the parts reach generateContent as OpenAI blocks.
+function convertContentForGemini(content) {
+    if (!Array.isArray(content)) return content;
     var out = [];
-    for (var i = 0; i < messages.length; i++) {
-        var m = messages[i];
-        if (m && Array.isArray(m.content)) {
-            var copy = _shallowCopy(m);
-            copy.content = convertContentForAnthropic(m.content);
-            out.push(copy);
-        } else {
-            out.push(m);
+    for (var i = 0; i < content.length; i++) {
+        var part = content[i];
+        if (!part) continue;
+        if (part.type === "text") {
+            out.push({ text: part.text || "" });
+            continue;
         }
+        if (part.type === "image_url" && part.image_url && typeof part.image_url.url === "string") {
+            var m = /^data:([^;]+);base64,(.*)$/.exec(part.image_url.url);
+            if (m)
+                out.push({ inlineData: { mimeType: m[1], data: m[2] } });
+            // generateContent has no remote-URL part; dropping a non-data URL
+            // beats sending a block the API rejects outright.
+            continue;
+        }
+        out.push(part);
     }
     return out;
 }
+
+function convertMessagesForGemini(messages) {
+    return mapMessageContent(messages, convertContentForGemini);
+}
+
+// ---------------------------------------------------------------------------
+// Error classification
+// ---------------------------------------------------------------------------
 
 // Does this failure mean "wrong endpoint for this model" rather than "your
 // request was bad"? Checked against the HTTP status and raw body so it does not
@@ -296,27 +372,27 @@ function explainError(status, body, fallbackMessage) {
         return i18n("This model is only served from OpenCode's China-hosted region and needs explicit opt-in on your account. Enable it at %1, or pick a different model.", CONSOLE_URL);
     }
     if (lower.indexOf("has been deprecated") !== -1) {
-        return i18n("OpenCode Go has retired this model upstream. Pick a newer one — the model list still advertises it, but no backend serves it.");
+        return i18n("OpenCode has retired this model upstream. Pick a newer one — the model list still advertises it, but no backend serves it.");
     }
     if (lower.indexOf("model is unavailable") !== -1) {
-        return i18n("OpenCode Go currently has no backend for this model. Pick a different one; availability shifts without notice.");
+        return i18n("OpenCode currently has no backend for this model. Pick a different one; availability shifts without notice.");
     }
     // Must precede the 401/403 check: a format mismatch answers 401, and
     // reporting it as a rejected key sends the user chasing the wrong problem.
     if (lower.indexOf("not supported for format") !== -1 || lower.indexOf("modelerror") !== -1) {
-        return i18n("OpenCode Go does not serve this model on any wire format PlasmaLLM supports. Pick a different model — this is not a problem with your API key.");
+        return i18n("OpenCode does not serve this model on any wire format PlasmaLLM supports. Pick a different model — this is not a problem with your API key.");
     }
     if (status === 401 || status === 403) {
-        return i18n("OpenCode Go rejected the API key (HTTP %1). Generate one at %2 and paste it into the API key field.", status, CONSOLE_URL);
+        return i18n("OpenCode rejected the API key (HTTP %1). Generate one at %2 and paste it into the API key field.", status, CONSOLE_URL);
     }
     if (status === 402) {
-        return i18n("OpenCode Go usage limit reached (HTTP 402). The plan caps spend per 5 hours, week, and month; wait for the window to reset, switch to a free model, or enable balance fallback at %1.", CONSOLE_URL);
+        return i18n("OpenCode usage limit reached (HTTP 402). The plan caps spend per 5 hours, week, and month; wait for the window to reset, switch to a free model, or enable balance fallback at %1.", CONSOLE_URL);
     }
     if (status === 429) {
-        return i18n("OpenCode Go rate limited this request (HTTP 429). Wait a moment, or switch model — the limit is shared across the models on your plan.");
+        return i18n("OpenCode rate limited this request (HTTP 429). Wait a moment, or switch model — the limit is shared across the models on your plan.");
     }
     if (looksLikeWrongEndpoint(status, text)) {
-        return i18n("OpenCode Go does not serve this model on either wire format right now (HTTP %1). Pick a different model — availability shifts between backends.", status);
+        return i18n("OpenCode does not serve this model on either wire format right now (HTTP %1). Pick a different model — availability shifts between backends.", status);
     }
     if (lower.indexOf("invalid function arguments json string") !== -1) {
         return i18n("The upstream rejected a stored tool call as malformed JSON. This conversation's history is corrupt; start a new chat with /clear.");
@@ -327,8 +403,14 @@ function explainError(status, body, fallbackMessage) {
     return fallbackMessage;
 }
 
+// ---------------------------------------------------------------------------
+// Send
+// ---------------------------------------------------------------------------
+
 function sendStreaming(opts) {
     var model = opts.model;
+    var staticProtocol = protocolFor(opts);
+
     var triedFormats = {};
     var failures = [];
 
@@ -368,33 +450,35 @@ function sendStreaming(opts) {
     function start(format) {
         triedFormats[format] = true;
 
-        var options = _shallowCopy(opts);
+        var o = copyOpts(opts);
+        // opts.tools/messages are always in neutral chat shape, whatever the
+        // route — so convert for every non-chat format, first attempt included.
+        // Always converting from the same source is what makes the formats
+        // reachable in any order.
         if (format === "anthropic") {
-            options.endpoint = ANTHROPIC_BASE;
-            options.tools = toAnthropicTools(opts.tools);
-            options.messages = convertMessagesForAnthropic(opts.messages);
+            o.tools = toAnthropicTools(opts.tools);
+            o.messages = convertMessagesForAnthropic(opts.messages);
         } else if (format === "responses") {
-            // The Responses strategy appends "/responses" to the endpoint, so
-            // it takes the same /v1 base as chat completions.
-            options.endpoint = OPENAI_BASE;
-            options.tools = toResponsesTools(opts.tools);
-            options.messages = convertMessagesForResponses(opts.messages);
-        } else {
-            options.endpoint = OPENAI_BASE;
+            o.usesResponsesAPI = true;
+            o.tools = toResponsesTools(opts.tools);
+            o.messages = convertMessagesForResponses(opts.messages);
+        } else if (format === "gemini") {
+            o.tools = toGeminiTools(opts.tools);
+            o.messages = convertMessagesForGemini(opts.messages);
         }
 
-        options.onComplete = function(text, error, toolCalls, assistantMsg) {
+        o.onComplete = function(text, error, toolCalls, assistantMsg) {
             var inner = proxy._inner;
             var status = (inner && inner.xhr) ? inner.xhr.status : 0;
             var body = (inner && inner.xhr) ? inner.xhr.responseText : "";
 
-            // Retry on the other wire format only when nothing was produced —
+            // Retry on another wire format only when nothing was produced —
             // never after partial output, which would duplicate it.
             var producedNothing = (!text || text.length === 0) && (!toolCalls || toolCalls.length === 0);
             if (error && producedNothing && looksLikeWrongEndpoint(status, body)) {
                 var other = nextUntriedFormat();
                 if (other) {
-                    console.warn("PlasmaLLM OpenCode Go: " + model + " rejected on " + format
+                    console.warn("PlasmaLLM OpenCode: " + model + " rejected on " + format
                                  + " (HTTP " + status + "), retrying as " + other);
                     failures.push({ format: format, status: status, body: body });
                     start(other);
@@ -412,7 +496,7 @@ function sendStreaming(opts) {
                 // Every format refused. Reporting only the last attempt would
                 // blame the wrong thing — a model can answer 503 on one
                 // endpoint and 401 on another, which reads as a bad key.
-                error = i18n("OpenCode Go could not serve \"%1\" on any supported wire format (%2). This usually means the model is not available on your plan right now — pick a different one.",
+                error = i18n("OpenCode could not serve \"%1\" on any supported wire format (%2). This usually means the model is not available on your plan right now — pick a different one.",
                              model, describeAttempts(format, status));
             } else {
                 error = explainError(status, body, error);
@@ -422,15 +506,19 @@ function sendStreaming(opts) {
         };
 
         var inner;
-        if (format === "anthropic") inner = Anthropic.sendStreaming(options);
-        else if (format === "responses") inner = Responses.sendStreaming(options);
-        else inner = Chat.sendStreaming(options);
+        if (format === "anthropic") inner = Anthropic.sendStreaming(o);
+        else if (format === "responses") inner = Responses.sendStreaming(o);
+        else if (format === "gemini") inner = Gemini.sendStreaming(o);
+        else inner = Chat.sendStreaming(o);
         proxy._inner = inner;
         proxy.xhr = inner.xhr;
         if (proxy._timer && inner.setPollTimer) inner.setPollTimer(proxy._timer);
         return inner;
     }
 
-    start(formatFor(model));
+    // The static route is the opening bid; a format proven this session beats
+    // it, since the published tables are exactly what goes stale.
+    var first = learnedFormats[model] || staticProtocol;
+    start(first);
     return proxy;
 }

@@ -5,6 +5,7 @@
 
 .import "../toolManager.js" as ToolManager
 .import "../toolCallNormalizer.js" as ToolCallNormalizer
+.import "geminiThinking.js" as GeminiThinking
 
 // Native Google Gemini adapter (POST /v1beta/models/{model}:streamGenerateContent
 // ?alt=sse, GET /v1beta/models). Translates the host's OpenAI-shaped neutral
@@ -30,7 +31,7 @@ var presets = [
 // effort field is hidden. Provider preset dropdown is hidden — only one
 // endpoint exists — but the endpoint field is kept editable for proxies.
 var capabilities = {
-    providerPresets: true,
+    providerPresets: false,
     customEndpoint: true,
     reasoningEffort: false,
     thinkingBudget: true,
@@ -79,9 +80,15 @@ function fetchModelsDev(providerId, filterFn, fallbackList, callback) {
 
 function setHeaders(xhr, apiKey, opts) {
     xhr.setRequestHeader("Content-Type", "application/json");
-    xhr.setRequestHeader("Api-Revision", "2026-05-07");
+    if (!(opts && opts.opencodeAuth))
+        xhr.setRequestHeader("Api-Revision", "2026-05-07");
     if (apiKey && apiKey.length > 0) {
-        if (opts && (opts.geminiVertexAuthType === "gcloud" || apiKey.indexOf("ya29.") === 0)) {
+        var isGcloud = opts && opts.geminiAuthMethod === "agentplatform" && opts.geminiVertexAuthType === "gcloud";
+        if (opts && opts.opencodeAuth) {
+            // Zen Gemini wants x-goog-api-key only. Authorization has been
+            // forwarded upstream and rejected as a Google token.
+            xhr.setRequestHeader("x-goog-api-key", apiKey);
+        } else if (isGcloud || apiKey.indexOf("ya29.") === 0) {
             xhr.setRequestHeader("Authorization", "Bearer " + apiKey);
         } else {
             xhr.setRequestHeader("x-goog-api-key", apiKey);
@@ -495,7 +502,13 @@ function sendStreaming(opts) {
     var url;
     var baseUrl = endpoint.replace(/\/+$/, "");
 
-    if (opts && opts.geminiAuthMethod === "agentplatform") {
+    if (opts && opts.opencodeAuth) {
+        // OpenCode Zen: POST {base}/models/{id}:streamGenerateContent?alt=sse
+        // (base is https://opencode.ai/zen/v1).
+        url = baseUrl +
+              "/models/" + encodeURIComponent(model) +
+              ":streamGenerateContent?alt=sse";
+    } else if (opts && opts.geminiAuthMethod === "agentplatform") {
         var projectId = (opts.geminiProjectId ? opts.geminiProjectId.trim() : "");
         var location = opts.geminiLocation || "global";
         
@@ -684,9 +697,14 @@ function sendStreaming(opts) {
             maxOutputTokens: maxTokens
         }
     };
-    // Gemini uses the thinking budget directly; setting it to 0 explicitly
-    // disables auto-thinking on 2.5-class models.
-    body.generationConfig.thinkingConfig = { thinkingBudget: opts.thinkingBudget || 0 };
+    // AI Studio lite rejects thinkingBudget:0; Vertex 2.5 rejects thinkingLevel.
+    // Helper picks a platform-safe config (never both fields).
+    body.generationConfig.thinkingConfig = GeminiThinking.buildThinkingConfig(
+        model,
+        opts.thinkingBudget || 0,
+        !!opts.showThoughts,
+        opts.geminiAuthMethod || "aistudio"
+    );
     if (translated.systemText && translated.systemText.length > 0) {
         body.systemInstruction = { parts: [{ text: translated.systemText }] };
     }

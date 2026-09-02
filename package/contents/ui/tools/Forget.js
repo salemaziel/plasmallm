@@ -5,6 +5,8 @@
 
 .pragma library
 
+.import "../memoryStore.js" as MemoryStore
+
 var name = "forget";
 var description = "Delete a saved memory, by the id shown in the Memory section of your system prompt or by a distinctive phrase from its text. Use it when a remembered fact is wrong, has been superseded, or the user asks you to forget something.";
 var parameters = {
@@ -34,7 +36,19 @@ function execute(args, context) {
 
     if (result.removed) {
         context.onDone("Forgot: " + result.text, "", 0);
-    } else {
-        context.onDone("", "No memory matched '" + args.target + "'.", 1);
+        return;
     }
+
+    // Deleting is irreversible, so an ambiguous phrase must not resolve to
+    // whichever entry happens to come first. Name the candidates and let the
+    // model re-ask with an id.
+    if (result.reason === "ambiguous") {
+        context.onDone("",
+            "'" + args.target + "' matches " + result.matches.length
+            + " saved memories. Call forget again with one of these ids:\n"
+            + MemoryStore.formatCandidates(result.matches), 1);
+        return;
+    }
+
+    context.onDone("", "No memory matched '" + args.target + "'.", 1);
 }

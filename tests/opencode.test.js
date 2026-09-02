@@ -1,11 +1,25 @@
 // Drives adapters/opencode.js with stubbed strategies to verify wire-format
-// routing, the one-shot fallback, and error attribution.
+// routing, the bounded retry, and error attribution.
+//
+// Protocol selection itself lives in opencodeRoute.js and is covered by
+// opencode_route.mjs; that real module is loaded here so these tests exercise
+// the adapter's actual routing rather than a copy of the rules.
 const fs = require('fs');
 const { UI } = require('./paths');
-const p = UI + '/adapters/opencode.js';
-const src = fs.readFileSync(p, 'utf8').replace(/^\s*\.import .*$/gm, '');
+const strip = s => s.replace(/^\s*\.import .*$/gm, '');
 
-// Scripted responses: model -> { openai: {status, body, ok}, anthropic: {...} }
+// The real routing module — pure, no QML or network.
+const routeMod = {};
+new Function('module',
+  fs.readFileSync(UI + '/opencodeRoute.js', 'utf8')
+  + '\nmodule.exports={productFromEndpoint,npmToProtocol,resolveProtocol};'
+)(routeMod);
+const Route = routeMod.exports;
+
+const ZEN = 'https://opencode.ai/zen/v1';
+const GO = 'https://opencode.ai/zen/go/v1';
+
+// Scripted responses: model -> { chat: {status, body, ok}, anthropic: {...} }
 let script = {};
 let callLog = [];
 
@@ -13,7 +27,7 @@ function makeStrategy(kind) {
   return {
     sendStreaming(opts) {
       const r = (script[opts.model] || {})[kind] || { status: 503, body: 'Endpoint is unavailable.' };
-      callLog.push({ kind, model: opts.model, endpoint: opts.endpoint, tools: opts.tools });
+      callLog.push({ kind, model: opts.model, endpoint: opts.endpoint, tools: opts.tools, opencodeAuth: opts.opencodeAuth });
       const xhr = { status: r.status, responseText: r.body || '' };
       // Strategies invoke onComplete synchronously here; real ones do it from
       // the xhr callback, which is equivalent for this logic.
@@ -23,8 +37,10 @@ function makeStrategy(kind) {
       }, 0);
       return { xhr, processBuffer() {}, setPollTimer() {} };
     },
-    buildTools: o => [],
-    buildContentArray: (t) => t,
+    // Tagged so a test can assert *which* adapter's builder ran, which is the
+    // whole point of the neutral-build invariant below.
+    buildTools: o => [{ builtBy: kind }],
+    buildContentArray: (t, a) => (a && a.length ? [{ builtBy: kind, text: t }] : t),
     fetchModels: () => {},
   };
 }
@@ -33,10 +49,14 @@ function makeStrategy(kind) {
 const i18n = (s, ...a) => a.reduce((acc, v, i) => acc.split(`%${i + 1}`).join(String(v)), s);
 
 const mod = {};
-new Function('module', 'console', 'i18n', 'Chat', 'Anthropic', 'Responses',
-  src + '\nmodule.exports={sendStreaming,formatFor,toAnthropicTools,toResponsesTools,'
-      + 'convertMessagesForAnthropic,convertMessagesForResponses,explainError,learnedFormats};'
-)(mod, { warn() {} }, i18n, makeStrategy('openai'), makeStrategy('anthropic'), makeStrategy('responses'));
+new Function('module', 'console', 'i18n', 'Chat', 'Anthropic', 'Responses', 'Gemini', 'Route',
+  strip(fs.readFileSync(UI + '/adapters/opencode.js', 'utf8'))
+  + '\nmodule.exports={sendStreaming,protocolFor,fetchModels,buildTools,buildContentArray,'
+  + 'toAnthropicTools,toResponsesTools,toGeminiTools,convertMessagesForAnthropic,'
+  + 'convertMessagesForResponses,convertMessagesForGemini,explainError,learnedFormats,presets};'
+)(mod, { warn() {} }, i18n,
+  makeStrategy('chat'), makeStrategy('anthropic'), makeStrategy('responses'), makeStrategy('gemini'),
+  Route);
 const OC = mod.exports;
 
 let pass = 0, fail = 0;
@@ -50,121 +70,209 @@ function like(label, got, needle) {
   ok ? (pass++, console.log(`  ok   ${label}`))
      : (fail++, console.log(`  FAIL ${label}\n         got "${got}"\n         want substring "${needle}"`));
 }
-const run = (model, tools) => new Promise(res => {
+const run = (model, tools, endpoint) => new Promise(res => {
   callLog = [];
-  OC.sendStreaming({ model, tools: tools || [], messages: [], onChunk() {}, onComplete: (t, e) => res({ text: t, error: e, log: callLog.slice() }) });
+  OC.sendStreaming({
+    model, tools: tools || [], messages: [], endpoint: endpoint || GO,
+    onChunk() {}, onComplete: (t, e) => res({ text: t, error: e, log: callLog.slice() })
+  });
 });
 
-console.log('\nformatFor — measured routing');
-eq('qwen3.7-plus -> anthropic (messages-only)', OC.formatFor('qwen3.7-plus'), 'anthropic');
-eq('qwen3.8-max -> anthropic', OC.formatFor('qwen3.8-max'), 'anthropic');
-eq('future qwen3.9-plus -> anthropic (family rule)', OC.formatFor('qwen3.9-plus'), 'anthropic');
-eq('glm-5.3 -> openai', OC.formatFor('glm-5.3'), 'openai');
-eq('minimax-m3 -> openai', OC.formatFor('minimax-m3'), 'openai');
-eq('gpt-5.6-luna -> responses (docs; avoids the chat shim)', OC.formatFor('gpt-5.6-luna'), 'responses');
-eq('grok-4.5 -> responses (unreachable on the other two)', OC.formatFor('grok-4.5'), 'responses');
+console.log('\nprotocolFor — routing through the real opencodeRoute rules');
+eq('qwen3.7-plus -> anthropic (messages-only)', OC.protocolFor({ endpoint: GO }, 'qwen3.7-plus'), 'anthropic');
+eq('future qwen3.9-plus -> anthropic (family rule)', OC.protocolFor({ endpoint: GO }, 'qwen3.9-plus'), 'anthropic');
+eq('glm-5.3 -> chat (defaulted)', OC.protocolFor({ endpoint: GO }, 'glm-5.3'), 'chat');
+eq('gpt-5.6-luna -> responses (avoids the lossy chat shim)', OC.protocolFor({ endpoint: GO }, 'gpt-5.6-luna'), 'responses');
+eq('grok-4.5 -> responses', OC.protocolFor({ endpoint: GO }, 'grok-4.5'), 'responses');
+eq('claude-sonnet-5 -> anthropic', OC.protocolFor({ endpoint: ZEN }, 'claude-sonnet-5'), 'anthropic');
+eq('gemini-3-pro -> gemini', OC.protocolFor({ endpoint: ZEN }, 'gemini-3-pro'), 'gemini');
+
+console.log('\nproduct — Zen and Go are both served, and they differ');
+eq('two presets, Zen and Go', OC.presets.map(p => p.name), ['OpenCode Zen', 'OpenCode Go']);
+eq('minimax-m3 on Go -> anthropic', OC.protocolFor({ endpoint: GO }, 'minimax-m3'), 'anthropic');
+eq('minimax-m3 on Zen -> chat (Go-only rule)', OC.protocolFor({ endpoint: ZEN }, 'minimax-m3'), 'chat');
+
+// The invariant the whole retry rests on: compose time is protocol-blind. If
+// a builder ever routes by protocol again, a payload becomes unconvertible and
+// the fallback silently posts a mis-shaped body.
+console.log('\nneutral build — compose time never routes by protocol');
+[['claude-sonnet-5', 'anthropic'], ['gpt-5.6-luna', 'responses'],
+ ['gemini-3-pro', 'gemini'], ['glm-5.3', 'chat']].forEach(([model, route]) => {
+  eq(`tools for ${model} (routes ${route}) are built by chat`,
+     OC.buildTools({ endpoint: ZEN, model }), [{ builtBy: 'chat' }]);
+  eq(`content for ${model} (routes ${route}) is built by chat`,
+     OC.buildContentArray('hi', [{ dataUrl: 'data:image/png;base64,AAA' }], { endpoint: ZEN, model }),
+     [{ builtBy: 'chat', text: 'hi' }]);
+});
 
 console.log('\ntoResponsesTools — flat schema, no function wrapper');
 eq('nested openai tool -> flat responses tool', OC.toResponsesTools([
-  { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
-]), [{ type: 'function', name: 'read_file', description: 'Read', parameters: { type: 'object', properties: { path: { type: 'string' } } } }]);
+  { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } }
+]), [{ type: 'function', name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } }]);
 eq('malformed tool skipped', OC.toResponsesTools([{ type: 'function' }]), []);
 
 console.log('\nconvertMessagesForResponses — chat parts -> responses parts');
 eq('text -> input_text, image_url -> input_image (bare url)', OC.convertMessagesForResponses([
-  { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
-]), [{ role: 'user', content: [{ type: 'input_text', text: 'look' }, { type: 'input_image', image_url: 'data:image/png;base64,AAAA' }] }]);
-eq('tool result text converted too (translateMessages reads input_text)', OC.convertMessagesForResponses([
-  { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'out' }] },
-]), [{ role: 'tool', tool_call_id: 'c1', content: [{ type: 'input_text', text: 'out' }] }]);
+  { role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }] }
+]), [{ role: 'user', content: [{ type: 'input_text', text: 'hi' }, { type: 'input_image', image_url: 'data:image/png;base64,AAA' }] }]);
 eq('string content untouched', OC.convertMessagesForResponses([{ role: 'user', content: 'plain' }]),
    [{ role: 'user', content: 'plain' }]);
 
 console.log('\ntoAnthropicTools — schema shape conversion');
 eq('openai tool -> anthropic tool', OC.toAnthropicTools([
-  { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: { path: { type: 'string' } } } } },
-]), [{ name: 'read_file', description: 'Read', input_schema: { type: 'object', properties: { path: { type: 'string' } } } }]);
+  { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } }
+]), [{ name: 'read_file', description: 'Read', input_schema: { type: 'object', properties: {} } }]);
 eq('malformed tool skipped', OC.toAnthropicTools([{ type: 'function' }]), []);
 
 console.log('\nconvertMessagesForAnthropic — attachments survive the /messages route');
 eq('image_url data URL -> anthropic image block', OC.convertMessagesForAnthropic([
-  { role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAAA' } }] },
-]), [{ role: 'user', content: [{ type: 'text', text: 'look' }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] }]);
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }] }
+]), [{ role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } }] }]);
 eq('remote image URL dropped, not sent as-is', OC.convertMessagesForAnthropic([
-  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }] },
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }] }
 ]), [{ role: 'user', content: [] }]);
-eq('string content untouched', OC.convertMessagesForAnthropic([{ role: 'user', content: 'plain' }]),
-   [{ role: 'user', content: 'plain' }]);
+// Every anthropic attempt now goes through this converter, not just retries,
+// so it has to reproduce anthropic.js's own isImageMime guard. /messages
+// rejects a non-image image block outright.
+eq('non-image data URL dropped, matching the native builder', OC.convertMessagesForAnthropic([
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:application/pdf;base64,AAA' } }] }
+]), [{ role: 'user', content: [] }]);
+eq('gemini keeps it — inlineData is not image-only', OC.convertMessagesForGemini([
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:application/pdf;base64,AAA' } }] }
+]), [{ role: 'user', content: [{ inlineData: { mimeType: 'application/pdf', data: 'AAA' } }] }]);
 eq('tool_call_id preserved through conversion', OC.convertMessagesForAnthropic([
-  { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'out' }] },
+  { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'out' }] }
+])[0].tool_call_id, 'c1');
+
+console.log('\ntoGeminiTools — one wrapper holding every declaration');
+eq('nested openai tools -> a single functionDeclarations object', OC.toGeminiTools([
+  { type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } },
+  { type: 'function', function: { name: 'run_command', description: 'Run', parameters: { type: 'object', properties: {} } } }
+]), [{ functionDeclarations: [
+  { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } },
+  { name: 'run_command', description: 'Run', parameters: { type: 'object', properties: {} } }
+] }]);
+eq('no tools -> [], not a wrapper around nothing', OC.toGeminiTools([]), []);
+eq('malformed tool skipped', OC.toGeminiTools([{ type: 'function' }]), []);
+
+console.log('\nconvertMessagesForGemini — chat parts -> untyped gemini parts');
+eq('text -> {text}, image_url -> {inlineData}', OC.convertMessagesForGemini([
+  { role: 'user', content: [{ type: 'text', text: 'hi' }, { type: 'image_url', image_url: { url: 'data:image/png;base64,AAA' } }] }
+]), [{ role: 'user', content: [{ text: 'hi' }, { inlineData: { mimeType: 'image/png', data: 'AAA' } }] }]);
+eq('remote image URL dropped — generateContent has no remote-URL part', OC.convertMessagesForGemini([
+  { role: 'user', content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }] }
+]), [{ role: 'user', content: [] }]);
+eq('string content untouched', OC.convertMessagesForGemini([{ role: 'user', content: 'plain' }]),
+   [{ role: 'user', content: 'plain' }]);
+eq('tool_call_id preserved through conversion', OC.convertMessagesForGemini([
+  { role: 'tool', tool_call_id: 'c1', content: [{ type: 'text', text: 'out' }] }
 ])[0].tool_call_id, 'c1');
 
 (async () => {
-  console.log('\nrouting — no wasted round trips');
-  script = { 'qwen3.7-plus': { anthropic: { status: 200 } }, 'glm-5.3': { openai: { status: 200 } } };
+  console.log('\nrouting — no wasted round trips, and auth is flagged for the gateway');
+  script = { 'qwen3.7-plus': { anthropic: { status: 200 } }, 'glm-5.3': { chat: { status: 200 } } };
   let r = await run('qwen3.7-plus');
   eq('qwen goes straight to messages, no chat attempt', r.log.map(c => c.kind), ['anthropic']);
-  eq('qwen uses the parent base path', r.log[0].endpoint, 'https://opencode.ai/zen/go');
   eq('qwen succeeds', r.error, null);
+  eq('opencodeAuth set so the strategy rewrites URL/headers', r.log[0].opencodeAuth, true);
+  eq('endpoint passed through untouched (no manual base juggling)', r.log[0].endpoint, GO);
 
   r = await run('glm-5.3');
-  eq('glm goes straight to chat', r.log.map(c => c.kind), ['openai']);
-  eq('glm uses the /v1 base', r.log[0].endpoint, 'https://opencode.ai/zen/go/v1');
+  eq('glm goes straight to chat', r.log.map(c => c.kind), ['chat']);
 
-  console.log('\nfallback — unknown model that turns out to be messages-only');
-  script = { 'newmodel-x': { openai: { status: 503, body: 'Endpoint is unavailable.' }, anthropic: { status: 200 } } };
+  console.log('\nretry — every route, because every payload is built neutrally');
+  script = { 'newmodel-x': { chat: { status: 503, body: 'Endpoint is unavailable.' }, anthropic: { status: 200 } } };
   r = await run('newmodel-x');
-  eq('falls back to messages after 503', r.log.map(c => c.kind), ['openai', 'anthropic']);
+  eq('falls back to messages after 503', r.log.map(c => c.kind), ['chat', 'anthropic']);
   eq('fallback succeeds', r.error, null);
   eq('learned for the session', OC.learnedFormats['newmodel-x'], 'anthropic');
   r = await run('newmodel-x');
   eq('second call skips the failed format', r.log.map(c => c.kind), ['anthropic']);
 
-  console.log('\nrouting — the /responses models');
-  script = { 'grok-4.5': { responses: { status: 200 } }, 'gpt-5.6-luna': { responses: { status: 200 } } };
+  // The published tables are exactly what goes stale, so a prefix match is a
+  // strong opening bid rather than a guarantee. It is tried first and costs no
+  // extra round trip, but it no longer dead-ends when the backend moves.
+  script = { 'grok-4.5': { responses: { status: 503, body: 'Endpoint is unavailable.' }, chat: { status: 200 } } };
   r = await run('grok-4.5');
-  eq('grok goes straight to responses, no wasted attempts', r.log.map(c => c.kind), ['responses']);
-  eq('responses uses the /v1 base (strategy appends /responses)', r.log[0].endpoint, 'https://opencode.ai/zen/go/v1');
-  eq('grok succeeds', r.error, null);
-  r = await run('gpt-5.6-luna');
-  eq('luna routed to responses, bypassing the chat shim', r.log.map(c => c.kind), ['responses']);
+  eq('a prefix-matched route is tried first, then falls back', r.log.map(c => c.kind), ['responses', 'chat']);
+  eq('and learns the format that worked', OC.learnedFormats['grok-4.5'], 'chat');
+  r = await run('grok-4.5');
+  eq('the learned format outranks the stale static route', r.log.map(c => c.kind), ['chat']);
 
-  console.log('\nrouting — tools are converted per format, not sent raw');
+  script = { 'gemini-3-pro': { gemini: { status: 503, body: 'Endpoint is unavailable.' }, chat: { status: 200 } } };
+  r = await run('gemini-3-pro', [], ZEN);
+  eq('a gemini route falls back too', r.log.map(c => c.kind), ['gemini', 'chat']);
+
+  // Gemini is last in FALLBACK_ORDER but must actually be reachable — it was
+  // absent from the order entirely while the retry was bounded to chat.
+  script = { 'lastresort-g': {
+    chat: { status: 503, body: 'Endpoint is unavailable.' },
+    anthropic: { status: 404, body: 'not found' },
+    responses: { status: 404, body: 'not found' },
+    gemini: { status: 200 },
+  } };
+  r = await run('lastresort-g');
+  eq('walks all four formats and lands on gemini', r.log.map(c => c.kind), ['chat', 'anthropic', 'responses', 'gemini']);
+  eq('gemini fallback succeeds', r.error, null);
+
+  console.log('\nconversion happens on every non-chat attempt, first one included');
   const NESTED = [{ type: 'function', function: { name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } } }];
-  r = await run('grok-4.5', NESTED);
-  eq('responses route gets flat tools', r.log[0].tools, [{ type: 'function', name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } }]);
-  script = { 'qwen3.7-plus': { anthropic: { status: 200 } }, 'glm-5.3': { openai: { status: 200 } } };
+
+  // The payload is neutral even when the static route is not chat, so the
+  // opening attempt has to convert as well. Skipping it there was what made a
+  // prefix-matched route unretryable.
+  script = { 'qwen3.7-plus': { anthropic: { status: 200 } } };
   r = await run('qwen3.7-plus', NESTED);
-  eq('anthropic route gets input_schema tools', r.log[0].tools, [{ name: 'read_file', description: 'Read', input_schema: { type: 'object', properties: {} } }]);
-  r = await run('glm-5.3', NESTED);
-  eq('chat route gets the nested tools unchanged', r.log[0].tools, NESTED);
+  eq('a first-attempt anthropic route gets converted tools', r.log[0].tools,
+     [{ name: 'read_file', description: 'Read', input_schema: { type: 'object', properties: {} } }]);
+
+  script = { 'gemini-3-flash': { gemini: { status: 200 } } };
+  r = await run('gemini-3-flash', NESTED, ZEN);
+  eq('a first-attempt gemini route gets a functionDeclarations wrapper', r.log[0].tools,
+     [{ functionDeclarations: [{ name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } }] }]);
+
+  script = { 'shapeshift-a': { chat: { status: 503, body: 'Endpoint is unavailable.' }, anthropic: { status: 200 } } };
+  r = await run('shapeshift-a', NESTED);
+  eq('chat attempt sends the nested tools as built', r.log[0].tools, NESTED);
+  eq('anthropic retry converts them to input_schema', r.log[1].tools,
+     [{ name: 'read_file', description: 'Read', input_schema: { type: 'object', properties: {} } }]);
+
+  script = { 'shapeshift-b': {
+    chat: { status: 503, body: 'Endpoint is unavailable.' },
+    anthropic: { status: 404, body: 'not found' },
+    responses: { status: 200 },
+  } };
+  r = await run('shapeshift-b', NESTED);
+  eq('walks chat -> anthropic -> responses', r.log.map(c => c.kind), ['chat', 'anthropic', 'responses']);
+  eq('responses retry gets flat tools', r.log[2].tools,
+     [{ type: 'function', name: 'read_file', description: 'Read', parameters: { type: 'object', properties: {} } }]);
 
   console.log('\nerror attribution');
   script = { 'ghost-model': {
-    openai: { status: 503, body: 'Endpoint is unavailable.' },
+    chat: { status: 503, body: 'Endpoint is unavailable.' },
     anthropic: { status: 404, body: 'not found' },
     responses: { status: 401, body: 'unauthorized' },
   } };
   r = await run('ghost-model');
-  eq('walks all three formats before giving up', r.log.map(c => c.kind), ['openai', 'anthropic', 'responses']);
+  eq('walks all three formats before giving up', r.log.map(c => c.kind), ['chat', 'anthropic', 'responses']);
   like('does NOT blame the API key', r.error, 'any supported wire format');
   like('names every attempt', r.error, 'anthropic: HTTP 404');
   eq('no misleading key advice', /api key/i.test(r.error), false);
 
-  script = { 'deepseek-v4-pro': { openai: { status: 403, body: '{"error":{"type":"RegionError","message":"only available hosted in China and requires explicit opt-in"}}' } } };
+  script = { 'deepseek-v4-pro': { chat: { status: 403, body: '{"error":{"type":"RegionError","message":"only available hosted in China and requires explicit opt-in"}}' } } };
   r = await run('deepseek-v4-pro');
-  eq('403 RegionError does not trigger a pointless retry', r.log.map(c => c.kind), ['openai']);
+  eq('403 RegionError does not trigger a pointless retry', r.log.map(c => c.kind), ['chat']);
   like('explains the region opt-in', r.error, 'China-hosted region');
 
-  script = { 'mimo-v2-pro': { openai: { status: 400, body: '[404] This model has been deprecated. It is recommended...' } } };
+  script = { 'mimo-v2-pro': { chat: { status: 400, body: '[404] This model has been deprecated. It is recommended...' } } };
   r = await run('mimo-v2-pro');
   like('deprecated model explained', r.error, 'retired this model');
 
-  script = { 'hy3-preview': { openai: { status: 400, body: 'Model is unavailable.' } } };
+  script = { 'hy3-preview': { chat: { status: 400, body: 'Model is unavailable.' } } };
   r = await run('hy3-preview');
   like('unavailable model explained', r.error, 'no backend for this model');
 
-  script = { 'somemodel': { openai: { status: 401, body: 'nope' } } };
+  script = { 'somemodel': { chat: { status: 401, body: 'nope' } } };
   r = await run('somemodel');
   like('genuine 401 still points at the key', r.error, 'rejected the API key');
 
@@ -172,20 +280,19 @@ eq('tool_call_id preserved through conversion', OC.convertMessagesForAnthropic([
   // which is a format mismatch, not an auth failure.
   console.log('\ncaptured — 401 that is a format mismatch, not a bad key');
   const MODEL_ERR = '{"type":"error","error":{"type":"ModelError","message":"Model minimax-m3 is not supported for format openai"}}';
-  script = { 'minimax-m3': { openai: { status: 200 } } };
   eq('401 ModelError is recognised as a wrong-endpoint signal',
      OC.explainError(401, MODEL_ERR, 'x').includes('not a problem with your API key'), true);
 
-  script = { 'oddball': { responses: { status: 401, body: MODEL_ERR }, openai: { status: 200 } } };
-  OC.learnedFormats['oddball'] = 'responses';   // pretend it was routed there
+  script = { 'oddball': { responses: { status: 401, body: MODEL_ERR }, chat: { status: 200 } } };
+  OC.learnedFormats['oddball'] = 'responses';   // pretend a prior turn landed there
   r = await run('oddball');
-  eq('a 401 ModelError still triggers the retry', r.log.map(c => c.kind), ['responses', 'openai']);
+  eq('a 401 ModelError still triggers the retry', r.log.map(c => c.kind), ['responses', 'chat']);
   eq('and the retry succeeds', r.error, null);
 
   console.log('\nsafety — never retry after partial output');
-  script = { 'partial-x': { openai: { status: 503, body: 'Endpoint is unavailable.', partial: 'half a sentence' }, anthropic: { status: 200 } } };
+  script = { 'partial-x': { chat: { status: 503, body: 'Endpoint is unavailable.', partial: 'half a sentence' }, anthropic: { status: 200 } } };
   r = await run('partial-x');
-  eq('no retry once text was emitted', r.log.map(c => c.kind), ['openai']);
+  eq('no retry once text was emitted', r.log.map(c => c.kind), ['chat']);
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

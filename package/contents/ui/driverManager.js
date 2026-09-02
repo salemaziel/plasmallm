@@ -14,6 +14,13 @@ var screenshotPathCallback = null;
 var activeContextUuid = "";
 var openWindowsList = [];
 
+function unwrapDbusValue(v) {
+    if (v !== null && typeof v === "object" && v.value !== undefined) {
+        return v.value;
+    }
+    return v;
+}
+
 function getActiveContext() {
     return activeContextUuid;
 }
@@ -51,7 +58,7 @@ function isDriverActive(callback) {
         var active = false;
         var replyObj = reply;
         if (replyObj && replyObj.values && replyObj.values.length > 0) {
-            active = replyObj.values[0].value || replyObj.values[0];
+            active = unwrapDbusValue(replyObj.values[0]);
         } else if (replyObj && replyObj.value !== undefined) {
             active = replyObj.value;
         }
@@ -94,7 +101,8 @@ function startSession(clientToken, callback) {
         path: "/com/joshuaroman/plasmallm/DesktopDriver",
         iface: "com.joshuaroman.plasmallm.DesktopDriver",
         member: "StartSession",
-        arguments: [clientToken || ""]
+        arguments: [clientToken || ""],
+        timeout: 90000
     }, function() {
         var args = Array.prototype.slice.call(arguments);
         var success = false;
@@ -145,16 +153,17 @@ function startSession(clientToken, callback) {
                 var active = false;
                 var replyObj = activeReply;
                 if (replyObj && replyObj.values && replyObj.values.length > 0) {
-                    active = replyObj.values[0].value || replyObj.values[0];
+                    active = unwrapDbusValue(replyObj.values[0]);
                 } else if (replyObj && replyObj.value !== undefined) {
                     active = replyObj.value;
                 }
+                active = (active === true || active === "true");
                 
-                isSessionActive = true;
+                isSessionActive = (active === true);
                 if (callback) callback(null, token, active);
             }, function(err) {
-                isSessionActive = true;
-                if (callback) callback(null, token, false);
+                isSessionActive = false;
+                if (callback) callback({error: "IsSessionActive failed: " + err.message});
             });
         } else {
             if (callback) callback({error: "Session denied or invalid token received. Args: " + JSON.stringify(args)});
@@ -198,7 +207,7 @@ function executeCommand(method, params, callback) {
                     callback("DBus Error: " + replyObj.error.message);
                     return;
                 }
-                replyStr = replyObj.value || (replyObj.values && replyObj.values[0] ? (replyObj.values[0].value || replyObj.values[0]) : "");
+                replyStr = replyObj.value || (replyObj.values && replyObj.values[0] ? unwrapDbusValue(replyObj.values[0]) : "");
             } else {
                 replyStr = args[0];
             }
@@ -269,7 +278,7 @@ function checkDriverSession(callback, keepTokenIfInactive) {
                 return;
             }
             if (replyObj.values && replyObj.values.length > 0) {
-                active = replyObj.values[0].value || replyObj.values[0];
+                active = unwrapDbusValue(replyObj.values[0]);
             } else if (replyObj.value !== undefined) {
                 active = replyObj.value;
             }

@@ -10,7 +10,7 @@ PlasmaLLM is designed for quick tasks and system-integrated workflows—not as a
 
 ## Features
 
-- **Multi-Provider Support**: Connects to Ollama, LM Studio, OpenAI, Anthropic Claude, Google Gemini, OpenCode Go, and any OpenAI-compatible API.
+- **Multi-Provider Support**: Connects to Ollama, LM Studio, OpenAI, Anthropic Claude, Google Gemini, OpenCode Zen/Go, and any OpenAI-compatible API.
 - **System Awareness**: Optionally gathers hardware, OS, and environment info to provide context for assistant responses.
 - **Tool-Calling System**: Modular architecture allowing LLMs to interact with the filesystem, run shell commands, and fetch web data (with user approval).
 - **Interactive Terminal Blocks**: View, copy, or execute suggested terminal commands. Supports session multiplexing via `tmux` or `screen`.
@@ -121,8 +121,9 @@ Right-click the widget and select **Configure PlasmaLLM...**:
 
 - **General**: Set your provider, model, and API keys.
 - **Appearance**: Configure fonts, bubble styles, and interface behavior.
-- **Tools**: Enable/disable specific tools and configure the filesystem whitelist for sandboxed operations.
+- **Tools**: Enable/disable specific tools and configure the filesystem whitelist for sandboxed operations. Finished tool results collapse to a small pill by default (per-tool toggle); click to expand.
 - **Tasks**: Manage custom script tools and shell command templates.
+- **Skills**: Discover and toggle Agent Skills (`SKILL.md` folders or `<name>.md` files) loaded on demand. PlasmaLLM ships a bundled `create-skill` helper; add your own under `~/.local/share/plasmallm/skills/` or extra directories in Settings. Skills may include `.sh` scripts run via `run_skill_script`; enable “Allow running skill scripts without approval” per skill in Settings. Use `/skills` in chat to list what is available.
 
 ## Support
 

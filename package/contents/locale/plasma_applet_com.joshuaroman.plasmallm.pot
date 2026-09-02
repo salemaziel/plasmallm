@@ -8,7 +8,7 @@ msgid ""
 msgstr ""
 "Project-Id-Version: PlasmaLLM\n"
 "Report-Msgid-Bugs-To: \n"
-"POT-Creation-Date: 2026-08-15 17:59-0400\n"
+"POT-Creation-Date: 2026-08-24 21:07-0400\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
@@ -16,15 +16,6 @@ msgstr ""
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
-
-msgid "Color button"
-msgstr ""
-
-msgid "Current color is %1. This button will open a color chooser dialog."
-msgstr ""
-
-msgid "Current color is %1."
-msgstr ""
 
 msgid "Request timed out after 30 seconds"
 msgstr ""
@@ -80,54 +71,13 @@ msgid ""
 "disable Native features in Settings."
 msgstr ""
 
-msgid ""
-"No custom tools configured. Add a custom tool to expose your own commands to "
-"the LLM."
+msgid "No tasks configured. Add a task to create reusable prompt shortcuts."
 msgstr ""
 
 msgid "AUTO"
 msgstr ""
 
 msgid "Cancel"
-msgstr ""
-
-msgid "Add Custom Tool"
-msgstr ""
-
-msgid "Echoes back the message provided."
-msgstr ""
-
-msgid "Tool name (e.g. systemctl_service)"
-msgstr ""
-
-msgid "Description (instructs the LLM what this tool does)"
-msgstr ""
-
-msgid "Command template (e.g. systemctl {action} {service})"
-msgstr ""
-
-msgid "Require Superuser (runs with pkexec)"
-msgstr ""
-
-msgid "Auto-run tool (no confirmation dialog)"
-msgstr ""
-
-msgid "Update Tool"
-msgstr ""
-
-msgid "Save Tool"
-msgstr ""
-
-msgid "A tool named \"%1\" already exists."
-msgstr ""
-
-msgid ""
-"Custom tools allow you to expose your own commands to the LLM. Use "
-"placeholders like {variable} in the Command Template to define parameters "
-"the LLM can fill. Values provided by the LLM are automatically shell-escaped."
-msgstr ""
-
-msgid "No tasks configured. Add a task to create reusable prompt shortcuts."
 msgstr ""
 
 msgid "Add Task"
@@ -166,6 +116,55 @@ msgstr ""
 msgid "Error: URL must start with http:// or https://"
 msgstr ""
 
+msgid "Error: content exceeds max write size (%1 bytes)"
+msgstr ""
+
+msgid ""
+"Error: Invalid HTTP method. Only GET, POST, PUT, DELETE, PATCH, HEAD, "
+"OPTIONS are allowed."
+msgstr ""
+
+msgid "Search provider %1 not supported"
+msgstr ""
+
+msgid "Searching the web for: %1…"
+msgstr ""
+
+msgid ""
+"This tool allows the primary assistant to retrieve original transcripts from "
+"cited message ranges. It runs automatically without asking for permission "
+"when Context Compaction is active."
+msgstr ""
+
+msgid "No command provided."
+msgstr ""
+
+msgid "Saved phrases:"
+msgstr ""
+
+msgid ""
+"Nothing remembered yet. The assistant can save phrases with its edit_memory "
+"tool, or add them below."
+msgstr ""
+
+msgid "Edit"
+msgstr ""
+
+msgid "Save"
+msgstr ""
+
+msgid "Remove"
+msgstr ""
+
+msgid "Memory is full"
+msgstr ""
+
+msgid "Add a phrase…"
+msgstr ""
+
+msgid "Add"
+msgstr ""
+
 msgid "Ask before running commands from LLM"
 msgstr ""
 
@@ -197,23 +196,15 @@ msgstr ""
 msgid "Reset Session"
 msgstr ""
 
+msgid "Kill persistent session (stops all processes and resets shell state)"
+msgstr ""
+
 msgid ""
 "Neither 'tmux' nor 'screen' was found on your system. Session multiplexing "
 "is unavailable."
 msgstr ""
 
-msgid "Error: content exceeds max write size (%1 bytes)"
-msgstr ""
-
-msgid ""
-"Error: Invalid HTTP method. Only GET, POST, PUT, DELETE, PATCH, HEAD, "
-"OPTIONS are allowed."
-msgstr ""
-
-msgid "Search provider %1 not supported"
-msgstr ""
-
-msgid "Searching the web for: %1…"
+msgid "Manage and discover skills in the Skills settings page."
 msgstr ""
 
 msgid "Ollama API"
@@ -285,7 +276,19 @@ msgstr ""
 msgid "Enables LLM-triggered web searches via Ollama's search API"
 msgstr ""
 
-msgid "No command provided."
+msgid ""
+"Runs a .sh file inside a skill folder. Per-run approval is skipped only when "
+"that skill has “Allow running skill scripts without approval” checked on the "
+"Skills settings page."
+msgstr ""
+
+msgid "Color button"
+msgstr ""
+
+msgid "Current color is %1. This button will open a color chooser dialog."
+msgstr ""
+
+msgid "Current color is %1."
 msgstr ""
 
 msgid "Tool Request: %1"
@@ -298,15 +301,6 @@ msgid "Deny"
 msgstr ""
 
 msgid "Approve"
-msgstr ""
-
-msgid "Stop command"
-msgstr ""
-
-msgid "Open terminal attached to this session"
-msgstr ""
-
-msgid "Copy output"
 msgstr ""
 
 msgid "Microphone recording failed"
@@ -348,130 +342,6 @@ msgstr ""
 msgid "Recording failed"
 msgstr ""
 
-msgid "Speech to Text"
-msgstr ""
-
-msgid "API key saved to local fallback (KWallet unavailable)."
-msgstr ""
-
-msgid "API key saved to KWallet."
-msgstr ""
-
-msgid "API key saved to local fallback."
-msgstr ""
-
-msgid "Set an API endpoint first."
-msgstr ""
-
-msgid "Fetching STT models…"
-msgstr ""
-
-msgid "Loaded %1 STT model(s)."
-msgstr ""
-
-msgid "Voice input:"
-msgstr ""
-
-msgid "Enable microphone input"
-msgstr ""
-
-msgid ""
-"Configures the speech-to-text engine only. Transcripts use your active chat "
-"profile (General)."
-msgstr ""
-
-msgid "Mic button:"
-msgstr ""
-
-msgid "Auto"
-msgstr ""
-
-msgid "Hold to talk"
-msgstr ""
-
-msgid "Toggle"
-msgstr ""
-
-msgid ""
-"Auto: click toggles recording; hold 250 ms+ for push-to-talk. Hold: press-"
-"and-hold only. Toggle: click to start/stop."
-msgstr ""
-
-msgid "Voice shortcut:"
-msgstr ""
-
-msgid ""
-"While PlasmaLLM is open and focused, uses the same mic mode as the button "
-"(auto: short press toggles, hold 250 ms+ is push-to-talk). Does not open the "
-"panel—use Activate widget on the Shortcuts page. Default: Ctrl+M. Clear to "
-"disable."
-msgstr ""
-
-msgid "Transcriber"
-msgstr ""
-
-msgid "Provider:"
-msgstr ""
-
-msgid "Endpoint:"
-msgstr ""
-
-msgid "Model:"
-msgstr ""
-
-msgid "Fetching…"
-msgstr ""
-
-msgid "Fetch"
-msgstr ""
-
-msgid "Fetch STT models"
-msgstr ""
-
-msgid ""
-"OpenRouter lists STT models only via transcription modalities (this page "
-"does that)."
-msgstr ""
-
-msgid "API key:"
-msgstr ""
-
-msgid "Provider API key"
-msgstr ""
-
-msgid "Save"
-msgstr ""
-
-msgid "Save API key"
-msgstr ""
-
-msgid "Options"
-msgstr ""
-
-msgid "Language hint:"
-msgstr ""
-
-msgid "Optional, e.g. en or ja (empty = auto)"
-msgstr ""
-
-msgid "Max recording (seconds):"
-msgstr ""
-
-msgid "STT backend:"
-msgstr ""
-
-msgid "OpenAI-compatible transcriptions"
-msgstr ""
-
-msgid "Speech-to-text is not configured"
-msgstr ""
-
-msgid "Unknown STT backend: %1"
-msgstr ""
-
-msgid "STT backend does not support model listing"
-msgstr ""
-
 msgid "STT endpoint is not configured"
 msgstr ""
 
@@ -500,6 +370,45 @@ msgid "STT failed (HTTP %1)"
 msgstr ""
 
 msgid "STT request failed: %1"
+msgstr ""
+
+msgid "No audio file to transcribe"
+msgstr ""
+
+msgid "Invalid Whisper model id"
+msgstr ""
+
+msgid "Invalid Whisper task"
+msgstr ""
+
+msgid "Invalid Whisper device"
+msgstr ""
+
+msgid "Whisper CLI failed (exit %1): %2"
+msgstr ""
+
+msgid "Whisper CLI failed (exit %1)"
+msgstr ""
+
+msgid "Try Device: cpu or Default in Speech to Text settings."
+msgstr ""
+
+msgid "Refresh model list"
+msgstr ""
+
+msgid "Select or enter a model"
+msgstr ""
+
+msgid "Search or type custom model…"
+msgstr ""
+
+msgid "Search models…"
+msgstr ""
+
+msgid "Use \"%1\""
+msgstr ""
+
+msgid "Fetching…"
 msgstr ""
 
 msgid "Profile Header:"
@@ -595,6 +504,9 @@ msgstr ""
 msgid "Show Copy conversation"
 msgstr ""
 
+msgid "Show Context compaction summary"
+msgstr ""
+
 msgid "Show Clear chat"
 msgstr ""
 
@@ -604,6 +516,9 @@ msgstr ""
 msgid "Show Pin"
 msgstr ""
 
+msgid "Loaded %1 skill"
+msgstr ""
+
 msgid "Voice message"
 msgstr ""
 
@@ -611,6 +526,14 @@ msgid "Error"
 msgstr ""
 
 msgid "Web Search"
+msgstr ""
+
+msgid "compacted"
+msgstr ""
+
+msgid ""
+"This message has been summarized into the compacted context. Citations "
+"active."
 msgstr ""
 
 msgid ""
@@ -648,6 +571,9 @@ msgstr ""
 msgid "Share output with assistant"
 msgstr ""
 
+msgid "The model loaded this skill's instructions into context before acting."
+msgstr ""
+
 msgid "Approve the pending tool request"
 msgstr ""
 
@@ -679,6 +605,9 @@ msgid "Save chat to file"
 msgstr ""
 
 msgid "Open settings"
+msgstr ""
+
+msgid "List discovered skills and their status"
 msgstr ""
 
 msgid "Run a saved task (/task <name>)"
@@ -743,10 +672,49 @@ msgstr ""
 msgid "Retry"
 msgstr ""
 
+msgid "Compacted Context Summary"
+msgstr ""
+
+#, javascript-format
+msgid "Compacted up to %1%2 • Citations active"
+msgstr ""
+
+msgid "Close"
+msgstr ""
+
+msgid "No compaction summary available."
+msgstr ""
+
+msgid "Copy"
+msgstr ""
+
+msgid "Compacting…"
+msgstr ""
+
+msgid "Re-compact"
+msgstr ""
+
+msgid "Incrementally compact new uncompacted conversation turns."
+msgstr ""
+
+msgid "Recompact All"
+msgstr ""
+
+msgid ""
+"Re-summarize the entire conversation from turn 1 from scratch, creating a "
+"fresh, unified compaction."
+msgstr ""
+
 msgid "Copy conversation"
 msgstr ""
 
 msgid "Command"
+msgstr ""
+
+msgid "View compacted context summary"
+msgstr ""
+
+msgid "Compacting context in background…"
 msgstr ""
 
 msgid "Clear chat"
@@ -814,13 +782,10 @@ msgstr ""
 msgid "Click to start"
 msgstr ""
 
+msgid "Hold to talk"
+msgstr ""
+
 msgid "Click to toggle, hold to talk"
-msgstr ""
-
-msgid "Kill"
-msgstr ""
-
-msgid "Kill persistent session (stops all processes and resets shell state)"
 msgstr ""
 
 msgid "Send"
@@ -833,6 +798,189 @@ msgid "Cancel LLM request"
 msgstr ""
 
 msgid "Drop files here to attach"
+msgstr ""
+
+msgid "Stop command"
+msgstr ""
+
+msgid "Open terminal attached to this session"
+msgstr ""
+
+msgid "Collapse result"
+msgstr ""
+
+msgid "Copy output"
+msgstr ""
+
+msgid "Context Compaction"
+msgstr ""
+
+msgid "(Active Chat Profile)"
+msgstr ""
+
+msgid "Unnamed Profile"
+msgstr ""
+
+msgid "Active Chat Profile"
+msgstr ""
+
+msgid "Active Chat Profile (Fallback)"
+msgstr ""
+
+msgid "Selected profile does not have an endpoint URL or model configured."
+msgstr ""
+
+msgid "Testing compaction call using '%1'…"
+msgstr ""
+
+msgid "Compaction test failed: %1"
+msgstr ""
+
+msgid "Compaction test succeeded!"
+msgstr ""
+
+msgid "Context Compaction:"
+msgstr ""
+
+msgid "Enable context compaction"
+msgstr ""
+
+msgid ""
+"Dramatically reduces token usage and speeds up responses in long "
+"conversations by compressing older turns into a dense background summary. "
+"Keeps your chats lightweight and cost-effective while your full history "
+"remains visible."
+msgstr ""
+
+msgid "Compaction Profile"
+msgstr ""
+
+msgid "Model Profile:"
+msgstr ""
+
+msgid "None"
+msgstr ""
+
+msgid ""
+"Provider: %1  |  Model: %2\n"
+"Endpoint: %3"
+msgstr ""
+
+msgid "Trigger Thresholds"
+msgstr ""
+
+msgid "Trigger Condition:"
+msgstr ""
+
+msgid "By Character Count"
+msgstr ""
+
+msgid "By Turn Count"
+msgstr ""
+
+msgid "Whichever comes first (Chars or Turns)"
+msgstr ""
+
+msgid "Character threshold:"
+msgstr ""
+
+msgid "chars (~%1 tokens)"
+msgstr ""
+
+msgid "Turn count interval:"
+msgstr ""
+
+msgid "turn (compacts after every turn)"
+msgstr ""
+
+msgid "turns"
+msgstr ""
+
+msgid "Keep recent turns:"
+msgstr ""
+
+msgid "full turns kept verbatim and uncompacted"
+msgstr ""
+
+msgid "Compaction Instructions"
+msgstr ""
+
+msgid "Instructions template:"
+msgstr ""
+
+msgid "Reset to Default Instructions"
+msgstr ""
+
+msgid "Diagnostic & Testing"
+msgstr ""
+
+msgid ""
+"Test compaction against your selected model profile using the sample "
+"transcript below:"
+msgstr ""
+
+msgid "Sample Conversation Transcript:"
+msgstr ""
+
+msgid "Reset Sample"
+msgstr ""
+
+msgid "Testing…"
+msgstr ""
+
+msgid "Test Compaction Connection"
+msgstr ""
+
+msgid "Model Summary Response:"
+msgstr ""
+
+msgid ""
+"No custom tools configured. Add a custom tool to expose your own commands to "
+"the LLM."
+msgstr ""
+
+msgid "Add Custom Tool"
+msgstr ""
+
+msgid "Echoes back the message provided."
+msgstr ""
+
+msgid "Tool name (e.g. systemctl_service)"
+msgstr ""
+
+msgid "Description (instructs the LLM what this tool does)"
+msgstr ""
+
+msgid "Command template (e.g. systemctl {action} {service})"
+msgstr ""
+
+msgid "Require Superuser (runs with pkexec)"
+msgstr ""
+
+msgid "Auto-run tool (no confirmation dialog)"
+msgstr ""
+
+msgid "Collapse results"
+msgstr ""
+
+msgid ""
+"Show finished results as a small pill; click the pill to view the full "
+"output."
+msgstr ""
+
+msgid "Update Tool"
+msgstr ""
+
+msgid "Save Tool"
+msgstr ""
+
+msgid "A tool named \"%1\" already exists."
+msgstr ""
+
+msgid ""
+"Custom tools allow you to expose your own commands to the LLM. Use "
+"placeholders like {variable} in the Command Template to define parameters "
+"the LLM can fill. Values provided by the LLM are automatically shell-escaped."
 msgstr ""
 
 msgid "Failed to fetch gcloud token (exit %1): %2"
@@ -905,13 +1053,13 @@ msgstr ""
 msgid "Location:"
 msgstr ""
 
+msgid "Provider:"
+msgstr ""
+
 msgid "API Endpoint:"
 msgstr ""
 
-msgid "Refreshing…"
-msgstr ""
-
-msgid "Refresh model list"
+msgid "Model:"
 msgstr ""
 
 msgid "API Key:"
@@ -1042,6 +1190,255 @@ msgstr ""
 msgid "minutes"
 msgstr ""
 
+msgid "Speech to Text"
+msgstr ""
+
+msgid "Model “%1” is on disk."
+msgstr ""
+
+msgid ""
+"Model “%1” is not downloaded. The first transcription will fetch it (%2) "
+"into ~/.cache/whisper and can take a long time."
+msgstr ""
+
+msgid ""
+"Model “%1” is not downloaded. The first transcription will fetch it into "
+"~/.cache/whisper and can take a long time."
+msgstr ""
+
+msgid "CUDA is available to Whisper."
+msgstr ""
+
+msgid "CUDA is not available in this Whisper environment. Use cpu or Default."
+msgstr ""
+
+msgid "Whisper CLI responded to --help."
+msgstr ""
+
+msgid "Whisper CLI test failed (exit %1): %2"
+msgstr ""
+
+msgid "Whisper CLI test failed (exit %1). Check the command."
+msgstr ""
+
+msgid "API key saved to KWallet."
+msgstr ""
+
+msgid "API key saved to local fallback."
+msgstr ""
+
+msgid "Checking whether “%1” is downloaded…"
+msgstr ""
+
+msgid "Checking CUDA…"
+msgstr ""
+
+msgid "Testing Whisper CLI…"
+msgstr ""
+
+msgid "Loaded %1 STT model(s)."
+msgstr ""
+
+msgid "Set an API endpoint first."
+msgstr ""
+
+msgid "Fetching STT models…"
+msgstr ""
+
+msgid "Voice input:"
+msgstr ""
+
+msgid "Enable microphone input"
+msgstr ""
+
+msgid ""
+"Configures the speech-to-text engine only. Transcripts use your active chat "
+"profile (General)."
+msgstr ""
+
+msgid "Mic button:"
+msgstr ""
+
+msgid "Auto"
+msgstr ""
+
+msgid "Toggle"
+msgstr ""
+
+msgid ""
+"Auto: click toggles recording; hold 250 ms+ for push-to-talk. Hold: press-"
+"and-hold only. Toggle: click to start/stop."
+msgstr ""
+
+msgid "Voice shortcut:"
+msgstr ""
+
+msgid ""
+"While PlasmaLLM is open and focused, uses the same mic mode as the button "
+"(auto: short press toggles, hold 250 ms+ is push-to-talk). Does not open the "
+"panel—use Activate widget on the Shortcuts page. Default: Ctrl+M. Clear to "
+"disable."
+msgstr ""
+
+msgid "Transcriber"
+msgstr ""
+
+msgid "STT backend:"
+msgstr ""
+
+msgid "Endpoint:"
+msgstr ""
+
+msgid "Fetch STT models"
+msgstr ""
+
+msgid ""
+"OpenRouter lists STT models only via transcription modalities (this page "
+"does that)."
+msgstr ""
+
+msgid "API key:"
+msgstr ""
+
+msgid "Provider API key"
+msgstr ""
+
+msgid "Save API key"
+msgstr ""
+
+msgid "Command:"
+msgstr ""
+
+msgid ""
+"Command prefix, inserted as-is. Examples: whisper, python3 -m whisper, "
+"toolbox run whisper."
+msgstr ""
+
+msgid "Test:"
+msgstr ""
+
+msgid "Test CLI"
+msgstr ""
+
+msgid "Task:"
+msgstr ""
+
+msgid "Transcribe"
+msgstr ""
+
+msgid "Translate"
+msgstr ""
+
+msgid "Device:"
+msgstr ""
+
+msgid "Default"
+msgstr ""
+
+msgid "FP16:"
+msgstr ""
+
+msgid "Use --fp16 True (GPU)"
+msgstr ""
+
+msgid "Threads:"
+msgstr ""
+
+msgid "0 omits --threads (Whisper default). FP16 off is safer on CPU."
+msgstr ""
+
+msgid "Initial prompt:"
+msgstr ""
+
+msgid "Optional vocabulary / style hint"
+msgstr ""
+
+msgid "Extra args:"
+msgstr ""
+
+msgid "Optional, appended as-is"
+msgstr ""
+
+msgid "Options"
+msgstr ""
+
+msgid "Language hint:"
+msgstr ""
+
+msgid "Optional, e.g. en or ja (empty = auto)"
+msgstr ""
+
+msgid "Max recording (seconds):"
+msgstr ""
+
+msgid "Speech-to-text is not configured"
+msgstr ""
+
+msgid "Unknown STT backend: %1"
+msgstr ""
+
+msgid "Whisper CLI runner is not available"
+msgstr ""
+
+msgid "Could not build Whisper command"
+msgstr ""
+
+msgid "STT backend does not support model listing"
+msgstr ""
+
+msgid "Enable skills"
+msgstr ""
+
+msgid ""
+"Skills are reusable instruction sets the model loads on demand via the skill "
+"tool. PlasmaLLM ships built-in skills (source: bundled). Add your own to "
+"~/.local/share/plasmallm/skills/ as a folder containing SKILL.md or a self-"
+"contained <name>.md file; a user skill with the same name overrides the "
+"bundled one."
+msgstr ""
+
+msgid ""
+"No skills discovered yet. Add a SKILL.md folder to the directory above or "
+"enable the extra directories below."
+msgstr ""
+
+msgid "DISABLED"
+msgstr ""
+
+msgid "Allow running skill scripts without approval"
+msgstr ""
+
+msgid "Refreshing…"
+msgstr ""
+
+msgid "Refresh"
+msgstr ""
+
+msgid "Open the skills directory in the file manager"
+msgstr ""
+
+msgid "Also scan ~/.claude/skills"
+msgstr ""
+
+msgid "Also scan ~/.agents/skills"
+msgstr ""
+
+msgid "/absolute/path/to/skills"
+msgstr ""
+
+msgid "Save directory"
+msgstr ""
+
+msgid "Add directory"
+msgstr ""
+
+msgid ""
+"Enabled skills are advertised to the model by name and description; the "
+"model loads full instructions on demand with the skill tool. Loaded skill "
+"content is re-sent in full every turn and is never affected by context "
+"compaction. Toggles here are global (not per-profile)."
+msgstr ""
+
 msgid "System Info:"
 msgstr ""
 
@@ -1111,6 +1508,11 @@ msgid "Enabled tool descriptions and guidelines from the Tools menu"
 msgstr ""
 
 msgid ""
+"Available skills index and instructions for skills loaded this session (from "
+"the Skills settings page)"
+msgstr ""
+
+msgid ""
 "Persistent tmux or screen session multiplexer instructions (when active)"
 msgstr ""
 
@@ -1176,9 +1578,6 @@ msgid "Path whitelist:"
 msgstr ""
 
 msgid "Add path, e.g. $HOME/projects, /tmp"
-msgstr ""
-
-msgid "Add"
 msgstr ""
 
 msgid ""
@@ -1272,6 +1671,9 @@ msgstr ""
 msgid "Could not send transcribed message."
 msgstr ""
 
+msgid "Transcription canceled"
+msgstr ""
+
 msgid "Recording too short or silent — try again."
 msgstr ""
 
@@ -1284,6 +1686,26 @@ msgstr ""
 msgid ""
 "Failed to fetch gcloud token (exit %1): %2. Please ensure gcloud is "
 "installed and authenticated."
+msgstr ""
+
+msgid ""
+"No skills found. Drop folders containing a SKILL.md into ~/.local/share/"
+"plasmallm/skills/ (configure extra directories in Settings → Skills)."
+msgstr ""
+
+msgid "invalid:"
+msgstr ""
+
+msgid "disabled"
+msgstr ""
+
+msgid "loaded"
+msgstr ""
+
+msgid "Available skills (%1 enabled):"
+msgstr ""
+
+msgid "Enable or disable individual skills in Settings → Skills."
 msgstr ""
 
 msgid "No tool request pending to approve."
@@ -1308,9 +1730,6 @@ msgid ""
 msgstr ""
 
 msgid "plasmallm-desktop-driver is not detected or running."
-msgstr ""
-
-msgid "Default"
 msgstr ""
 
 msgid "Current profile: **%1**"
@@ -1385,7 +1804,9 @@ msgstr ""
 msgid "Executing %1…"
 msgstr ""
 
-msgid "Session reset requested."
+msgid ""
+"Loaded '%1' skill — its full instructions were added to this conversation's "
+"context."
 msgstr ""
 
 msgid "Failed to start drive session: %1"
@@ -1459,6 +1880,12 @@ msgid ""
 "Perform a web search to find current information, news, or specific facts."
 msgstr ""
 
+msgid ""
+"Restore the full verbatim text and tool outputs of previously compacted "
+"messages by specifying the start and end message IDs from a cited message "
+"range."
+msgstr ""
+
 msgid "General"
 msgstr ""
 
@@ -1469,6 +1896,9 @@ msgid "System Prompt"
 msgstr ""
 
 msgid "Tasks"
+msgstr ""
+
+msgid "Skills"
 msgstr ""
 
 msgid "Tools"

@@ -53,5 +53,110 @@ if (schemas) {
 const section = TM.buildSystemPromptSection(base, null);
 eq('recall is described in the system prompt', section.indexOf('recall') !== -1, true);
 
+// The store refuses ambiguous references; these check the tools actually
+// surface that refusal instead of reporting a success the user cannot see is
+// wrong. Thin glue, but it is the glue the user-visible behaviour rides on.
+console.log('\nforget — an ambiguous phrase is reported, not guessed at');
+{
+  const Forget = load('tools/Forget.js');
+  const candidates = [
+    { id: 'm_a', text: 'the printer is a Brother HL-L2350DW' },
+    { id: 'm_b', text: 'the printer lives in the back room' }
+  ];
+  let out = null;
+  Forget.execute({ target: 'the printer', justification: 'x' }, {
+    memory: {
+      remove: () => ({ removed: false, reason: 'ambiguous', matches: candidates, memories: candidates })
+    },
+    onDone: (text, err, code) => { out = { text, err, code }; },
+    error: (e) => { out = { text: '', err: e, code: 1 }; }
+  });
+  eq('reports a failure', out && out.code, 1);
+  eq('says how many matched', out.err.indexOf('matches 2 saved memories') !== -1, true);
+  eq('names both ids so the model can retry precisely',
+     out.err.indexOf('m_a') !== -1 && out.err.indexOf('m_b') !== -1, true);
+}
+
+console.log('\nremember — replaces routes to update, not a second add');
+{
+  const Remember = load('tools/Remember.js');
+  const meta = TM.getToolMetadata('remember', base);
+  eq('replaces is offered', !!meta.parameters.properties.replaces, true);
+  eq('but is not required', meta.parameters.required.indexOf('replaces'), -1);
+
+  let called = null, out = null;
+  const ctx = (updateResult) => ({
+    config: { memoryEnabled: true },
+    memory: {
+      add: () => { called = 'add'; return { added: true, id: 'm_new', pinned: true, text: 'x', reason: 'ok' }; },
+      update: (target, text) => { called = 'update'; return updateResult(target, text); }
+    },
+    onDone: (text, err, code) => { out = { text, err, code }; },
+    error: (e) => { out = { text: '', err: e, code: 1 }; }
+  });
+
+  Remember.execute({ text: 'Sam runs Via Del Web', replaces: 'm_1', justification: 'x' },
+    ctx(() => ({ updated: true, id: 'm_1', oldText: 'Sam works at Via Del Web', text: 'Sam runs Via Del Web', matches: [], reason: 'ok' })));
+  eq('calls update, never add', called, 'update');
+  eq('succeeds', out.code, 0);
+  eq('reports both wordings', out.text.indexOf('Sam works at Via Del Web') !== -1
+     && out.text.indexOf('Sam runs Via Del Web') !== -1, true);
+
+  called = null; out = null;
+  Remember.execute({ text: 'new wording', replaces: 'the printer', justification: 'x' },
+    ctx(() => ({ updated: false, matches: [{ id: 'm_a', text: 'a' }, { id: 'm_b', text: 'b' }], reason: 'ambiguous' })));
+  eq('an ambiguous replaces is refused', out.code, 1);
+  eq('and does NOT silently fall back to adding a duplicate', called, 'update');
+
+  called = null; out = null;
+  Remember.execute({ text: 'a brand new fact', justification: 'x' }, ctx(() => null));
+  eq('without replaces it still adds', called, 'add');
+}
+
+console.log('\nthe gating config actually reaches the gate');
+// The gating tests above hand-build { memoryEnabled: true } and pass. They
+// prove the GATE works and say nothing about whether the real caller supplies
+// the key — and it did not: main.qml's getToolsConfig() carried upstream's
+// toolsEditMemory*/memoryPhrases through the merge but never the fork's own
+// memoryEnabled/memoryAutoRun. config.memoryEnabled read as undefined, so
+// remember/forget/recall silently never registered, the model could never
+// write a fact, and the store stayed empty while Settings still said memory
+// was on. A hand-built fixture cannot catch that; comparing the two sets can.
+{
+  const fs = require('fs');
+  const { UI } = require('./paths');
+
+  function objectKeys(src, fnName) {
+    const start = src.indexOf('function ' + fnName + '(');
+    const body = src.slice(start, src.indexOf('\n    }\n', start));
+    const out = new Set();
+    const re = /^\s+([A-Za-z_][A-Za-z0-9_]*)\s*:/gm;
+    let m;
+    while ((m = re.exec(body)) !== null) out.add(m[1]);
+    return out;
+  }
+  function configReads(src, fnName) {
+    const start = src.indexOf('function ' + fnName + '(');
+    const body = src.slice(start, src.indexOf('\n}\n', start));
+    const out = new Set();
+    const re = /config\.([A-Za-z_][A-Za-z0-9_]*)/g;
+    let m;
+    while ((m = re.exec(body)) !== null) out.add(m[1]);
+    return out;
+  }
+
+  const supplied = objectKeys(fs.readFileSync(UI + '/main.qml', 'utf8'), 'getToolsConfig');
+  const tmSrc = fs.readFileSync(UI + '/toolManager.js', 'utf8');
+  const read = new Set([
+    ...configReads(tmSrc, 'getEnabledTools'),
+    ...configReads(tmSrc, 'isAutoRun')
+  ]);
+
+  eq('getToolsConfig was located and is non-trivial', supplied.size > 20, true);
+  eq('the gating functions were located', read.size > 5, true);
+  eq('every config key the gating functions read is supplied by getToolsConfig',
+     [...read].filter(k => !supplied.has(k)).sort(), []);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

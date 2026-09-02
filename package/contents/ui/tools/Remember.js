@@ -5,6 +5,8 @@
 
 .pragma library
 
+.import "../memoryStore.js" as MemoryStore
+
 var name = "remember";
 var description = "Save a durable fact about the user, their system, or their preferences so it is available in future conversations. Use it for things that stay true (names, hardware, workflows, standing preferences), not for details that only matter in this chat. One fact per call, written as a short self-contained statement.";
 var parameters = {
@@ -22,6 +24,10 @@ var parameters = {
         pin: {
             type: "boolean",
             description: "Optional. True keeps this fact in your system prompt permanently instead of leaving it to be searched with recall. The pinned budget is small, so reserve it for facts relevant to almost every conversation (who the user is, their main machine, standing preferences). Omit for anything narrower."
+        },
+        replaces: {
+            type: "string",
+            description: "Optional. The id (for example m_k3f9x2ab) or a distinctive phrase from an existing memory that this text corrects. Use it whenever a saved fact has changed rather than calling forget and then remember — replacing keeps the entry's id, its pinned state and how often it has been useful. The phrase must match only one memory."
         },
         justification: {
             type: "string",
@@ -42,6 +48,47 @@ function execute(args, context) {
     }
     if (!context.config || !context.config.memoryEnabled) {
         context.onDone("Memory is disabled in settings; nothing was saved.", "", 0);
+        return;
+    }
+
+    // A correction rewrites the existing entry rather than minting a new one,
+    // so its id, pinned state and use history survive being right the second
+    // time. Failures here are reported instead of silently falling through to
+    // an add, which would leave the stale fact in place beside the new one.
+    if (args.replaces !== undefined && args.replaces !== null && String(args.replaces).length > 0) {
+        if (typeof context.memory.update !== "function") {
+            context.error("This build cannot replace memories.");
+            return;
+        }
+        var upd = context.memory.update(args.replaces, args.text);
+        if (upd.updated) {
+            context.onDone("Updated [" + upd.id + "]: \"" + upd.oldText + "\" is now \"" + upd.text + "\"", "", 0);
+            return;
+        }
+        if (upd.reason === "ambiguous") {
+            context.onDone("",
+                "'" + args.replaces + "' matches " + upd.matches.length
+                + " saved memories. Call remember again with one of these ids in replaces:\n"
+                + MemoryStore.formatCandidates(upd.matches), 1);
+            return;
+        }
+        if (upd.reason === "unchanged") {
+            context.onDone("Already remembered [" + upd.id + "] with that wording; nothing changed.", "", 0);
+            return;
+        }
+        if (upd.reason === "duplicate") {
+            context.onDone("", "That wording is already saved as [" + upd.id + "]. Forget one of the two instead.", 1);
+            return;
+        }
+        if (upd.reason === "pin_budget") {
+            context.onDone("", "The rewritten fact no longer fits the pinned budget. Ask the user to unpin something in Memory settings, or shorten it.", 1);
+            return;
+        }
+        if (upd.reason === "not_found") {
+            context.onDone("", "No memory matched '" + args.replaces + "'. Call recall to find its id, or omit replaces to save this as a new fact.", 1);
+            return;
+        }
+        context.onDone("", "Nothing to remember: the text was empty.", 1);
         return;
     }
 

@@ -11,6 +11,9 @@
 .import "toolManager.js" as ToolManager
 .import "driverManager.js" as DriverManager
 .import "memoryStore.js" as MemoryStore
+.import "walletCore.js" as WalletCore
+.import "skills.js" as Skills
+.import "reasoningSplit.js" as ReasoningSplit
 
 function localISODateTime() {
     var d = new Date();
@@ -48,6 +51,7 @@ var DEFAULT_SYSTEM_PROMPT_TEMPLATE = "You are a helpful assistant embedded in th
     "{{memories}}\n" +
     "{{session_multiplexer}}\n" +
     "{{approval_mode}}\n" +
+    "{{skills}}\n" +
     "{{tools}}\n" +
     "{{driving_instructions}}";
 
@@ -60,6 +64,7 @@ function getLocalizedDefaultSystemPromptTemplate(i18nFn) {
         "{{memories}}\n" +
         "{{session_multiplexer}}\n" +
         "{{approval_mode}}\n" +
+        "{{skills}}\n" +
         "{{tools}}\n" +
         "{{driving_instructions}}";
 }
@@ -127,7 +132,14 @@ function buildSystemPrompt(sysInfo, template, options) {
     var approvalText = buildApprovalModeSection(options);
     var trFn = (options && typeof options.i18n === "function") ? options.i18n : (typeof i18n === "function" ? i18n : null);
     var toolsText = options.toolsConfig ? ToolManager.buildSystemPromptSection(options.toolsConfig, trFn) : "";
-
+    var skillsText = "";
+    if (options.toolsConfig && options.toolsConfig.skillsEnabled) {
+        skillsText = Skills.buildSystemPromptSection(
+            options.toolsConfig.loadedSkills || [],
+            options.toolsConfig.skillsDisabledList,
+            options.toolsConfig.activeSkills || []
+        );
+    }
     // The archive index is only worth printing when the model can act on it,
     // so check that `recall` actually survived the tool gating rather than
     // assuming memory being enabled is enough.
@@ -149,6 +161,7 @@ function buildSystemPrompt(sysInfo, template, options) {
         system_info: systemInfoText,
         memories: memoriesText,
         tools: toolsText,
+        skills: skillsText,
         session_multiplexer: sessionText,
         approval_mode: approvalText,
         driving_instructions: drivingText,
@@ -189,6 +202,11 @@ function buildSystemPrompt(sysInfo, template, options) {
     if (memoriesText && tplLower.indexOf("{{memories}}") === -1) {
         out += "\n\n" + memoriesText;
     }
+    // Skills are force-appended like the critical runtime sections above:
+    // without the index the model can never discover the skill tool's purpose.
+    if (skillsText && tplLower.indexOf("{{skills}}") === -1 && tplLower.indexOf("<available_skills>") === -1) {
+        out += "\n\n" + skillsText;
+    }
 
     out = out.replace(/\n{3,}/g, "\n\n").trim();
 
@@ -208,6 +226,17 @@ function mimeForImage(filePath) {
 function isImageFile(filePath) {
     var ext = filePath.split(".").pop().toLowerCase();
     return ["png", "jpg", "jpeg", "gif", "webp", "bmp", "svg"].indexOf(ext) !== -1;
+}
+
+// Breeze icon name for a non-image attachment, by extension.
+function iconForFile(filePath) {
+    var ext = filePath.split(".").pop().toLowerCase();
+    if (ext === "pdf") return "application-pdf";
+    if (["zip", "tar", "gz", "bz2", "xz", "7z", "rar"].indexOf(ext) !== -1) return "application-zip";
+    if (["mp3", "wav", "ogg", "flac", "m4a", "opus"].indexOf(ext) !== -1) return "audio-x-generic";
+    if (["mp4", "mkv", "webm", "mov", "avi"].indexOf(ext) !== -1) return "video-x-generic";
+    if (["md", "markdown"].indexOf(ext) !== -1) return "text-markdown";
+    return "text-x-generic";
 }
 
 function stripCodeBlocks(text) {
@@ -262,195 +291,60 @@ function getCapabilities(apiType) {
     return Adapters.getAdapter(apiType).capabilities;
 }
 
-// ---------------------------------------------------------------------------
-// KWallet password entry names (PlasmaLLM folder)
-//
-// Current scheme (KEY_SLOT_SCHEME_VERSION = 2):
-//   Chat:   v1/chat/<profileId>/<apiType>/<providerOr[url]>
-//   Search: v1/search/_/<provider>          (global; "_" = shared)
-//
-// Custom chat endpoints use square brackets around the URL:
-//   v1/chat/p_default/openai/[http://localhost:11434/v1]
-//
-// Legacy names (read fallback + one-time migration only; never write):
-//   apiKey
-//   apiKey:openai:OpenRouter
-//   apiKey:profile:p_default
-//   exaApiKey / ollamaSearchApiKey / ollamaApiKey / searxngApiKey
-// ---------------------------------------------------------------------------
+// Wallet entry names live in walletCore.js (v2| pipe names; v1/ and apiKey:* are read fallbacks).
+var KEY_SLOT_SCHEME_VERSION = WalletCore.KEY_SLOT_SCHEME_VERSION;
+var LEGACY_SEARCH_KEY_MAP = WalletCore.LEGACY_SEARCH_KEY_MAP;
 
-var KEY_SLOT_SCHEME_VERSION = 2;
-
-function normalizeEndpoint(endpoint) {
-    if (!endpoint) return "";
-    return String(endpoint).replace(/\/+$/, "");
+function normalizeEndpoint(endpoint) { return WalletCore.normalizeEndpoint(endpoint); }
+function slotApiType(apiType, geminiAuthMethod) { return WalletCore.slotApiType(apiType, geminiAuthMethod); }
+function slotProviderPart(providerName, endpoint, apiType, geminiAuthMethod) {
+    return WalletCore.slotProviderPart(providerName, endpoint, apiType, geminiAuthMethod);
 }
-
-// Single path token for api type (no colons — reserved for legacy parsing only).
-function slotApiType(apiType, geminiAuthMethod) {
-    var t = apiType || "openai";
-    if (t === "gemini" && geminiAuthMethod === "agentplatform")
-        return "gemini_agentplatform";
-    if (t === "gemini:agentplatform" || t === "gemini_agentplatform")
-        return "gemini_agentplatform";
-    return t;
-}
-
-// Final path segment for chat: preset name, or [url] for Custom.
-function slotProviderPart(providerName, endpoint) {
-    var p = (providerName && String(providerName).length > 0) ? String(providerName) : "Custom";
-    if (p === "Custom")
-        return "[" + normalizeEndpoint(endpoint) + "]";
-    return p;
-}
-
 function chatKeySlot(profileId, apiType, providerName, endpoint, geminiAuthMethod) {
-    var pid = (profileId && String(profileId).length > 0) ? String(profileId) : "_";
-    return "v1/chat/" + pid + "/"
-        + slotApiType(apiType, geminiAuthMethod) + "/"
-        + slotProviderPart(providerName, endpoint);
+    return WalletCore.chatKeySlot(profileId, apiType, providerName, endpoint, geminiAuthMethod);
 }
-
-// Search keys are global across profiles (matches historical exaApiKey, etc.).
-function searchKeySlot(searchProvider) {
-    var p = searchProvider || "ollama";
-    return "v1/search/_/" + p;
-}
-
-// Speech-to-text keys are global (one STT connection), not per chat profile.
-//   v1/stt/OpenRouter
-//   v1/stt/[https://openrouter.ai/api/v1]
-function sttKeySlot(providerName, endpoint) {
-    return "v1/stt/" + slotProviderPart(providerName, endpoint);
-}
-
-// --- Public names used by main.qml / configGeneral.qml ---
-
+function searchKeySlot(searchProvider) { return WalletCore.searchKeySlot(searchProvider); }
+function searchLegacyKeySlots(searchProvider) { return WalletCore.searchLegacyKeySlots(searchProvider); }
+function sttKeySlot(providerName, endpoint) { return WalletCore.sttKeySlot(providerName, endpoint); }
+function sttLegacyKeySlots(providerName, endpoint) { return WalletCore.sttLegacyKeySlots(providerName, endpoint); }
 function currentKeySlot(activeProfileId, apiType, providerName, endpoint, geminiAuthMethod) {
-    return chatKeySlot(activeProfileId, apiType, providerName, endpoint, geminiAuthMethod);
+    return WalletCore.currentKeySlot(activeProfileId, apiType, providerName, endpoint, geminiAuthMethod);
 }
-
-// Legacy provider-only (pre-path scheme).
 function legacyProviderKeySlot(apiType, providerName, endpoint, geminiAuthMethod) {
-    var t = apiType || "openai";
-    if (t === "gemini" && geminiAuthMethod === "agentplatform")
-        t = "gemini:agentplatform";
-    var p = (providerName && providerName.length > 0) ? providerName : "Custom";
-    if (p === "Custom" && endpoint && String(endpoint).length > 0)
-        p = "Custom:" + normalizeEndpoint(endpoint);
-    return "apiKey:" + t + ":" + p;
+    return WalletCore.legacyProviderKeySlot(apiType, providerName, endpoint, geminiAuthMethod);
 }
-
-function legacyProfileKeySlot(profileId) {
-    return "apiKey:profile:" + profileId;
-}
-
-// Ordered fallbacks when the v1/chat primary is empty (load + migration source).
+function legacyProfileKeySlot(profileId) { return WalletCore.legacyProfileKeySlot(profileId); }
 function legacyKeySlots(activeProfileId, apiType, providerName, endpoint, geminiAuthMethod) {
-    var out = [legacyProviderKeySlot(apiType, providerName, endpoint, geminiAuthMethod)];
-    if (activeProfileId && String(activeProfileId).length > 0)
-        out.push(legacyProfileKeySlot(activeProfileId));
-    out.push("apiKey");
-    return out;
+    return WalletCore.legacyKeySlots(activeProfileId, apiType, providerName, endpoint, geminiAuthMethod);
 }
-
-// Aliases kept so older call sites / migration code keep working.
-function apiKeySlot(apiType, providerName) {
-    return legacyProviderKeySlot(apiType, providerName, "", null);
-}
-function profileKeySlot(profileId) {
-    return legacyProfileKeySlot(profileId);
-}
+function apiKeySlot(apiType, providerName) { return WalletCore.apiKeySlot(apiType, providerName); }
+function profileKeySlot(profileId) { return WalletCore.profileKeySlot(profileId); }
 function providerKeySlot(apiType, providerName, endpoint, geminiAuthMethod) {
-    return legacyProviderKeySlot(apiType, providerName, endpoint, geminiAuthMethod);
+    return WalletCore.providerKeySlot(apiType, providerName, endpoint, geminiAuthMethod);
 }
 function compositeKeySlot(profileId, apiType, providerPart) {
-    // Map old composite builder onto v1/chat (providerPart may be "Custom:url").
-    var providerName = providerPart;
-    var endpoint = "";
-    if (providerPart && providerPart.indexOf("Custom:") === 0) {
-        providerName = "Custom";
-        endpoint = providerPart.substring(7);
-    }
-    // apiType may be "gemini:agentplatform" from old parsers
-    var geminiAuth = null;
-    var t = apiType || "openai";
-    if (t === "gemini:agentplatform") {
-        t = "gemini";
-        geminiAuth = "agentplatform";
-    }
-    return chatKeySlot(profileId, t, providerName, endpoint, geminiAuth);
+    return WalletCore.compositeKeySlot(profileId, apiType, providerPart);
 }
-
-function isLegacyProfileOnlySlot(name) {
-    return /^apiKey:profile:[^:]+$/.test(name || "");
-}
-
-function isProviderOnlyChatSlot(name) {
-    if (!name || name.indexOf("apiKey:") !== 0) return false;
-    if (name === "apiKey") return false;
-    if (name.indexOf("apiKey:profile:") === 0) return false;
-    return name.substring(7).indexOf(":") !== -1;
-}
-
-function parseProviderOnlySlot(name) {
-    if (!isProviderOnlyChatSlot(name)) return null;
-    var rest = name.substring(7);
-    if (rest.indexOf("gemini:agentplatform:") === 0) {
-        return {
-            apiType: "gemini",
-            geminiAuthMethod: "agentplatform",
-            providerName: rest.substring("gemini:agentplatform:".length),
-            endpoint: ""
-        };
-    }
-    var colon = rest.indexOf(":");
-    if (colon < 0) return null;
-    var type = rest.substring(0, colon);
-    var prov = rest.substring(colon + 1);
-    var endpoint = "";
-    var providerName = prov;
-    if (prov.indexOf("Custom:") === 0) {
-        providerName = "Custom";
-        endpoint = prov.substring(7);
-    }
-    return {
-        apiType: type,
-        geminiAuthMethod: null,
-        providerName: providerName,
-        endpoint: endpoint
-    };
-}
-
-function parseLegacyProfileOnlySlot(name) {
-    if (!isLegacyProfileOnlySlot(name)) return null;
-    return name.substring("apiKey:profile:".length);
-}
-
-// Model-list cache (config JSON, not KWallet). Keep independent of wallet scheme.
+function isLegacyProfileOnlySlot(name) { return WalletCore.isLegacyProfileOnlySlot(name); }
+function isProviderOnlyChatSlot(name) { return WalletCore.isProviderOnlyChatSlot(name); }
+function parseProviderOnlySlot(name) { return WalletCore.parseProviderOnlySlot(name); }
+function parseLegacyProfileOnlySlot(name) { return WalletCore.parseLegacyProfileOnlySlot(name); }
 function modelCacheSlot(apiType, providerName, endpoint, activeProfileId, geminiAuthMethod) {
-    var type = slotApiType(apiType, geminiAuthMethod);
-    var prov = slotProviderPart(providerName, endpoint);
-    var base = "models:" + type + ":" + prov;
-    if (activeProfileId && String(activeProfileId).length > 0)
-        return "models:" + activeProfileId + ":" + type + ":" + prov;
-    return base;
+    return WalletCore.modelCacheSlot(apiType, providerName, endpoint, activeProfileId, geminiAuthMethod);
 }
-
-// Legacy search wallet entry names → new v1/search/_/<provider>
-var LEGACY_SEARCH_KEY_MAP = {
-    "exaApiKey": "exa",
-    "ollamaSearchApiKey": "ollama",
-    "ollamaApiKey": "ollama",
-    "searxngApiKey": "searxng"
-};
+function clampGeminiApiVariant(variant, geminiAuthMethod, vertexAuthType) {
+    return WalletCore.clampGeminiApiVariant(variant, geminiAuthMethod, vertexAuthType);
+}
+function resolvedApiType(apiType, geminiApiVariant, geminiAuthMethod, vertexAuthType) {
+    return WalletCore.resolvedApiType(apiType, geminiApiVariant, geminiAuthMethod, vertexAuthType);
+}
 
 function getAdapterChoices() {
     return [
         { id: "openai",    name: _tr(null, "OpenAI-compatible") },
         { id: "anthropic", name: _tr(null, "Anthropic") },
         { id: "gemini",    name: _tr(null, "Google Gemini") },
-        { id: "opencode",  name: _tr(null, "OpenCode Go") },
+        { id: "opencode",  name: _tr(null, "OpenCode") },
         { id: "exa",       name: _tr(null, "Exa") }
     ];
 }
@@ -481,16 +375,23 @@ function buildTools(apiType, options) {
     return Adapters.getAdapter(apiType).buildTools(options);
 }
 
-function buildContentArray(apiType, text, attachments, usesResponsesAPI) {
+function buildContentArray(apiType, text, attachments, usesResponsesAPI, extra) {
     var ad = Adapters.getAdapter(apiType);
     if (apiType === "openai") {
         return ad.buildContentArray(text, attachments, !!usesResponsesAPI);
     }
+    if (apiType === "opencode") {
+        return ad.buildContentArray(text, attachments, extra || {});
+    }
     return ad.buildContentArray(text, attachments);
 }
 
+// Single dispatch point for every adapter, and the only seam that also covers
+// OpenCode's format-retry — its inner adapters are handed a copy of these same
+// callbacks, so wrapping here catches a retried attempt too. See
+// reasoningSplit.js for why models that inline <think> need this at all.
 function sendStreaming(apiType, opts) {
-    return Adapters.getAdapter(apiType).sendStreaming(opts);
+    return Adapters.getAdapter(apiType).sendStreaming(ReasoningSplit.wrapStreamOpts(opts));
 }
 
 // GREEK LETTERS AND MATH SYMBOLS FOR LATEX CHARACTER REPLACEMENT

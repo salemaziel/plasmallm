@@ -388,22 +388,50 @@ Kirigami.AbstractCard {
             }
 
             Rectangle {
+                id: thinkingBox
                 Layout.fillWidth: true
-                Layout.preferredHeight: thinkingText.implicitHeight + Kirigami.Units.gridUnit
+
+                // Height is clamped rather than tracking the text directly.
+                // The box is sized from the text's implicitHeight, and wrapped
+                // text only knows its height once it knows its width — so a
+                // bad width binding silently collapses the whole drawer to
+                // about one line. The floor makes that unreadable state
+                // unreachable whatever the text reports; the ceiling stops a
+                // long chain of reasoning from pushing the reply off screen,
+                // with the Flickable taking over past that point.
+                readonly property real naturalHeight: thinkingText.implicitHeight + messageItem.bubblePadding * 2
+                readonly property real minHeight: Kirigami.Units.gridUnit * 6
+                readonly property real maxHeight: Kirigami.Units.gridUnit * 20
+                Layout.preferredHeight: Math.round(
+                    Math.max(minHeight, Math.min(naturalHeight, maxHeight)))
+
                 visible: thinkingCheck.checked
                 color: Kirigami.Theme.alternateBackgroundColor
                 radius: Kirigami.Units.smallSpacing
 
                 Flickable {
+                    id: thinkingFlick
                     anchors.fill: parent
                     anchors.margins: messageItem.bubblePadding
                     contentWidth: width
                     contentHeight: thinkingText.implicitHeight
                     clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+
+                    QQC2.ScrollBar.vertical: QQC2.ScrollBar {
+                        // Without this there is no indication that a capped
+                        // block continues past the fold.
+                        policy: thinkingFlick.contentHeight > thinkingFlick.height
+                                ? QQC2.ScrollBar.AlwaysOn : QQC2.ScrollBar.AlwaysOff
+                    }
 
                     PlasmaComponents.Label {
                         id: thinkingText
-                        width: parent.width
+                        // Bound to the Flickable by id, NOT to `parent`: a
+                        // Flickable reparents its children onto an internal
+                        // contentItem, so `parent.width` here is not the usable
+                        // text width. That is what collapsed the drawer.
+                        width: thinkingFlick.width
                         text: thinking
                         wrapMode: Text.Wrap
                         font.family: root.thoughtsFontFamily

@@ -49,19 +49,32 @@ function _findOpen(s, from) {
 }
 
 // A tag can be cut in half across two SSE deltas, so a trailing fragment that
-// could still become an open tag must be withheld rather than shown. It is
+// could still become a tag must be withheld rather than shown. It is
 // re-examined on the next chunk, because split() always re-reads the whole
 // accumulated text rather than tracking partial state.
-function _trimPartialTag(s) {
+//
+// `prefixes` is the set of complete tags a fragment might be growing into.
+function _trimPartialTag(s, prefixes) {
     var lt = s.lastIndexOf("<");
     if (lt === -1) return s;
     var tail = s.slice(lt);
     if (tail.indexOf(">") !== -1) return s; // already a complete tag, not a fragment
-    for (var t = 0; t < TAG_NAMES.length; t++) {
-        var open = "<" + TAG_NAMES[t] + ">";
-        if (open.indexOf(tail) === 0) return s.slice(0, lt);
+    for (var t = 0; t < prefixes.length; t++) {
+        if (prefixes[t].indexOf(tail) === 0) return s.slice(0, lt);
     }
     return s;
+}
+
+function _openTags() {
+    var out = [];
+    for (var t = 0; t < TAG_NAMES.length; t++) out.push("<" + TAG_NAMES[t] + ">");
+    return out;
+}
+
+function _closeTags() {
+    var out = [];
+    for (var t = 0; t < TAG_NAMES.length; t++) out.push("</" + TAG_NAMES[t] + ">");
+    return out;
 }
 
 /**
@@ -91,8 +104,12 @@ function split(text) {
         var closeTag = "</" + found.name + ">";
         var close = s.indexOf(closeTag, afterOpen);
         if (close === -1) {
-            // Still streaming inside the block.
-            thinking += s.slice(afterOpen);
+            // Still streaming inside the block. Withhold a trailing fragment
+            // that is on its way to becoming the CLOSING tag — otherwise a
+            // chunk boundary landing inside "</think>" flashes "</thi" into
+            // the reasoning pane, and since the corrected text is SHORTER than
+            // what was already shown, a grow-only emit guard never repairs it.
+            thinking += _trimPartialTag(s.slice(afterOpen), _closeTags());
             open = true;
             break;
         }
@@ -100,7 +117,7 @@ function split(text) {
         i = close + closeTag.length;
     }
 
-    visible = _trimPartialTag(visible);
+    visible = _trimPartialTag(visible, _openTags());
     // The reply almost always begins "\n\n" after the closing tag; keeping it
     // would leave every such message opening on blank lines.
     visible = visible.replace(/^\s+/, "");
@@ -144,8 +161,15 @@ function wrapStreamOpts(opts) {
         var r = split(accumulated);
         if (!r.inline) return null;
 
-        if (origThinking && r.thinking.length > emittedThinking.length) {
-            var td = r.thinking.slice(emittedThinking.length);
+        // Emit on any CHANGE, not only on growth. Reasoning can legitimately
+        // get shorter between chunks — a withheld tag fragment resolving is
+        // the normal case — and a grow-only guard leaves the stale, longer
+        // text on screen permanently. Consumers are given the corrected
+        // accumulated string; the delta is empty when the text shrank, since
+        // there is no new text to append.
+        if (origThinking && r.thinking !== emittedThinking) {
+            var td = r.thinking.indexOf(emittedThinking) === 0
+                ? r.thinking.slice(emittedThinking.length) : "";
             emittedThinking = r.thinking;
             origThinking(td, emittedThinking);
         }

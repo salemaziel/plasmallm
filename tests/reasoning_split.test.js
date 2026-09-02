@@ -104,6 +104,55 @@ console.log('\nno thinkingBlocks are synthesised');
     eq('no thinkingBlocks added', seen.thinkingBlocks, undefined);
 })();
 
+console.log('\nchunk-boundary exhaustion');
+// The bug this replaces was found in production, not here, because the
+// original suite only tried hand-picked chunk splits and none of them landed
+// inside "</think>". A boundary there leaks the partial close tag into the
+// reasoning pane, and the corrected text is SHORTER than what was already
+// shown — so a grow-only emit guard never repairs it. Every boundary is
+// cheap to check, so check every boundary.
+(function () {
+    const RAW = '<think>The user just said "yo" - a casual greeting. No tools needed, '
+              + 'just a brief friendly response.</think>Yo! What\'s up?';
+    const WANT_T = 'The user just said "yo" - a casual greeting. No tools needed, '
+                 + 'just a brief friendly response.';
+    const WANT_V = "Yo! What's up?";
+
+    function drive(chunks) {
+        let lastT = '', lastV = '', complete = null;
+        const w = RS.wrapStreamOpts({
+            onChunk: (d, a) => { lastV = a; },
+            onThinkingChunk: (d, a) => { lastT = a; },
+            onComplete: (t) => { complete = t; }
+        });
+        let acc = '';
+        for (const c of chunks) { acc += c; w.onChunk(c, acc); }
+        w.onComplete(acc, null, null, null);
+        return { lastT, lastV, complete };
+    }
+
+    let badT = 0, badV = 0;
+    for (let i = 1; i < RAW.length; i++) {
+        const r = drive([RAW.slice(0, i), RAW.slice(i)]);
+        if (r.lastT !== WANT_T) badT++;
+        if (r.lastV !== WANT_V || r.complete !== WANT_V) badV++;
+    }
+    eq('every 2-chunk boundary yields the exact reasoning', badT, 0);
+    eq('every 2-chunk boundary yields the exact reply', badV, 0);
+
+    // Character-by-character is the realistic worst case for a token stream,
+    // and it failed 100% of the time before the fix.
+    const c = drive(RAW.split(''));
+    eq('char-by-char reasoning is exact', c.lastT, WANT_T);
+    eq('char-by-char reply is exact', c.lastV, WANT_V);
+    eq('char-by-char onComplete is exact', c.complete, WANT_V);
+
+    // A partial CLOSING tag must never be shown as reasoning.
+    eq('a half-arrived close tag is withheld',
+       RS.split('<think>done.</thi').thinking, 'done.');
+    eq('and the block is still open', RS.split('<think>done.</thi').open, true);
+})();
+
 console.log('\napi.js wiring');
 // The splitter is inert unless api.js actually applies it. Structural, because
 // stubbing the adapter registry through the .pragma library loader is not

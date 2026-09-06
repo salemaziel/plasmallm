@@ -36,6 +36,7 @@ test:
 	node tests/path_sandbox.mjs
 	node tests/opencode_route.mjs
 	@./tests/run.sh
+	node tests/utils.mjs
 
 # Translations
 translations: check-translations $(MO_FILES)

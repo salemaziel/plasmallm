@@ -186,11 +186,74 @@ function loadProfilesRaw(raw) {
 }
 
 function loadProfiles(config) {
-    return loadProfilesRaw(config.profiles);
+    return loadProfilesRaw(_readProfilesRaw(config));
 }
 
 function saveProfiles(config, profiles) {
-    config.profiles = JSON.stringify(profiles);
+    _writeProfiles(config, profiles);
+}
+
+// Discriminate "runtime map" vs "KCM page" on the UNPREFIXED keys:
+// Plasmoid.configuration exposes declared entries directly (`profiles`,
+// `activeProfileId`), while KCM pages only carry cfg_-prefixed properties.
+// Checking cfg_ first would misread a stale dynamic cfg_ property on the
+// runtime map — the config dialog enumerates every map key and would then
+// try to inject "cfg_cfg_profiles" onto pages (see plasma's
+// AppletConfiguration.qml) — and would also persist the blob under a
+// non-declared key, which silently never survives restarts.
+function _readProfilesRaw(config) {
+    if (!config) return "";
+    if (config.profiles !== undefined)
+        return config.profiles || "";
+    return config.cfg_profiles || "";
+}
+
+function _writeProfiles(config, profiles) {
+    var json = JSON.stringify(profiles);
+    if (config.profiles !== undefined)
+        config.profiles = json;
+    else
+        config.cfg_profiles = json;
+}
+
+function _readActiveId(config) {
+    if (!config) return "";
+    if (config.activeProfileId !== undefined)
+        return config.activeProfileId || "";
+    return config.cfg_activeProfileId || "";
+}
+
+function _writeActiveId(config, id) {
+    if (config.activeProfileId !== undefined)
+        config.activeProfileId = id;
+    else
+        config.cfg_activeProfileId = id;
+}
+
+// Create and persist a Default profile when the list is empty.
+// `config` may be Plasmoid.configuration (`profiles`) or a KCM page (`cfg_profiles`).
+function ensureDefault(config, name) {
+    var raw = _readProfilesRaw(config);
+    var list = [];
+    if (raw) {
+        try {
+            list = JSON.parse(raw);
+            if (!Array.isArray(list))
+                throw new Error("Profiles must be an array");
+        } catch (e) {
+            console.error("Cannot seed Default: preserving invalid profiles JSON:", e);
+            return [];
+        }
+    }
+    if (list && list.length > 0)
+        return list;
+    var p = createProfile(name || "Default", config || {});
+    p.id = "p_default";
+    list = [p];
+    _writeProfiles(config, list);
+    if (!_readActiveId(config))
+        _writeActiveId(config, "p_default");
+    return list;
 }
 
 function getActive(profiles, activeId) {

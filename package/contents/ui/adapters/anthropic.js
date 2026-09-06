@@ -52,6 +52,14 @@ function setHeaders(xhr, apiKey, opts) {
         if (opts && opts.opencodeAuth)
             xhr.setRequestHeader("Authorization", "Bearer " + apiKey);
     }
+    // Generic extra-headers path: callers (e.g. the OpenCode gateway) add
+    // request headers via opts.extraHeaders = { "Name": value }.
+    if (opts && opts.extraHeaders) {
+        for (var h in opts.extraHeaders) {
+            if (opts.extraHeaders.hasOwnProperty(h))
+                xhr.setRequestHeader(h, opts.extraHeaders[h]);
+        }
+    }
 }
 
 function fetchModels(endpoint, apiKey, opts, callback) {
@@ -64,7 +72,7 @@ function fetchModels(endpoint, apiKey, opts, callback) {
 
     xhr.open("GET", url);
     xhr.timeout = 30000;
-    setHeaders(xhr, apiKey);
+    setHeaders(xhr, apiKey, opts);
 
     xhr.ontimeout = function() {
         callback(i18n("Request timed out after 30 seconds"), null);

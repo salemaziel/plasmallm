@@ -26,6 +26,7 @@ import "toolCallNormalizer.js" as ToolCallNormalizer
 import "memoryStore.js" as MemoryStore
 import "skills.js" as Skills
 import "memory.js" as Memory
+import "utils.js" as Utils
 
 PlasmoidItem {
     id: root
@@ -56,6 +57,9 @@ PlasmoidItem {
     property bool _switchingProfile: false
     // Bumped on each profile/config identity change; stale wallet callbacks no-op.
     property int _configGen: 0
+    // Stable per-conversation request ID (sent as x-opencode-session to the
+    // OpenCode gateway). Regenerated on clearChat and on message edits.
+    property string chatSessionId: Utils.uuidv4()
 
     // --- Speech-to-text / hold-to-talk ---
     property bool isRecording: false
@@ -140,6 +144,8 @@ PlasmoidItem {
     property var sysInfo: ({})
     property int sysInfoPending: 0
     property bool systemPromptReady: false
+    // Binding reads the profiles string so Instantiator/title update after first-run seed.
+    readonly property var profilesList: Profiles.loadProfilesRaw(Plasmoid.configuration.profiles)
     property var terminalCommands: ([])
     property var saveCommands: ([])
     property string currentChatFile: ""
@@ -570,6 +576,7 @@ PlasmoidItem {
                     compConfig.geminiVertexAuthType),
                 endpoint: compConfig.endpoint,
                 apiKey: compConfig.apiKey,
+                sessionId: root.chatSessionId,
                 model: compConfig.model,
                 geminiApiVariant: Api.clampGeminiApiVariant(
                     compConfig.geminiApiVariant,
@@ -1124,6 +1131,9 @@ PlasmoidItem {
 
     function editMessageContent(displayIndex, newContent) {
         if (displayIndex < 0 || displayIndex >= displayMessages.count) return;
+        // An edit starts a new request shape; treat it as a new conversation
+        // for the session header (matches clearChat behavior).
+        root.chatSessionId = Utils.uuidv4();
         displayMessages.setProperty(displayIndex, "content", newContent);
 
         var chatIdx = findChatIndexForDisplayIndex(displayIndex);
@@ -1764,24 +1774,31 @@ PlasmoidItem {
     }
 
     function initSystemPrompt() {
-        var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
-            i18n: i18n,
-            sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
-            autoRunCommands: Plasmoid.configuration.autoRunCommands, 
-            autoMode: root.isAutoMode, 
-            commandToolEnabled: Plasmoid.configuration.useCommandTool, 
-            sessionMultiplexer: root.sessionChipText(),
-            localizeSystemPrompt: Plasmoid.configuration.localizeSystemPrompt,
-            toolsConfig: getToolsConfig(),
-            memories: Plasmoid.configuration.memoryEnabled ? root.memories : []
-        });
-        Plasmoid.configuration.gatheredSysInfo = JSON.stringify(sysInfo);
-        if (systemPromptReady) {
-            chatMessages.setProperty(0, "content", prompt);
-        } else {
-            chatMessages.append({ msgId: "msg_sys_0", turnId: "turn_0", role: "system", content: prompt });
-            systemPromptReady = true;
+        try {
+            var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, {
+                i18n: i18n,
+                sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime,
+                autoRunCommands: Plasmoid.configuration.autoRunCommands,
+                autoMode: root.isAutoMode,
+                commandToolEnabled: Plasmoid.configuration.useCommandTool,
+                sessionMultiplexer: root.sessionChipText(),
+                localizeSystemPrompt: Plasmoid.configuration.localizeSystemPrompt,
+                toolsConfig: getToolsConfig(),
+                memories: Plasmoid.configuration.memoryEnabled ? root.memories : []
+            });
+            Plasmoid.configuration.gatheredSysInfo = JSON.stringify(sysInfo);
+            if (chatMessages.count > 0) {
+                chatMessages.setProperty(0, "content", prompt);
+            } else {
+                chatMessages.append({ msgId: "msg_sys_0", turnId: "turn_0", role: "system", content: prompt });
+            }
+        } catch (e) {
+            console.warn("PlasmaLLM: failed to build system prompt: " + e);
+            systemPromptReady = false;
+            return;
         }
+        systemPromptReady = true;
+        sysInfoTimeout.stop();
     }
 
     function regatherSysInfo() {
@@ -1923,6 +1940,8 @@ PlasmoidItem {
         streamingMessageIndex = -1;
         chatMessages.clear();
         displayMessages.clear();
+        // New conversation, new session ID for the x-opencode-session header.
+        root.chatSessionId = Utils.uuidv4();
         // Migration notice is not part of the transcript, but clear should
         // dismiss it so users aren't stuck with a sticky banner after "Clear chat".
         showApiKeyMigrationNotice = false;
@@ -2008,7 +2027,8 @@ PlasmoidItem {
             version: 2,
             created: new Date().toISOString(),
             provider: Plasmoid.configuration.providerName || "",
-            model: Plasmoid.configuration.modelName || ""
+            model: Plasmoid.configuration.modelName || "",
+            sessionId: root.chatSessionId
         }));
 
         // Compaction state
@@ -2179,6 +2199,13 @@ PlasmoidItem {
             try { meta = JSON.parse(lines[0]); } catch(e) {}
         }
         var version = (meta && meta.version) ? meta.version : 1;
+
+        // Resume the saved conversation's session identity (x-opencode-session).
+        // Legacy v1 files (and txt saves) keep the fresh id clearChat() minted.
+        if (version >= 2 && typeof meta.sessionId === "string"
+                && meta.sessionId.length > 0 && meta.sessionId.length <= 64) {
+            root.chatSessionId = meta.sessionId;
+        }
 
         if (version === 1) {
             LegacyChatLoader.loadV1(lines, chatMessages, displayMessages, fileReader, pendingFileReads, root.appendDisplayMessage);
@@ -3232,6 +3259,7 @@ PlasmoidItem {
             var streamHandle = Api.sendStreaming(root.effectiveApiType, {
                 endpoint: Plasmoid.configuration.apiEndpoint,
                 apiKey: effectiveKey,
+                sessionId: root.chatSessionId,
                 exaApiKey: root.exaApiKey,
                 model: Plasmoid.configuration.modelName,
                 messages: messages,
@@ -4145,13 +4173,16 @@ PlasmoidItem {
     Timer {
         id: sysInfoTimeout
         interval: 3000
-        running: false
+        running: true
         repeat: false
         onTriggered: {
             if (sysInfoPending > 0) {
                 console.warn("PlasmaLLM: system info timed out with " + sysInfoPending + " commands pending");
                 pendingSysInfoCommands = {};
                 sysInfoPending = 0;
+            }
+            if (!systemPromptReady) {
+                console.warn("PlasmaLLM: system prompt was not ready after startup; retrying initialization");
                 initSystemPrompt();
             }
         }
@@ -4266,16 +4297,8 @@ PlasmoidItem {
             Plasmoid.configuration.sttMigratedFromProfile = true;
         }
 
-        if (Plasmoid.configuration.latexRenderMode === -1) {
-            latexMatplotlibDetector.connectSource("python3 -c 'import matplotlib'");
-        }
-
         if (!Plasmoid.configuration.desktopAutomationToken) {
-            var uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-                var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
-                return v.toString(16);
-            });
-            Plasmoid.configuration.desktopAutomationToken = uuid;
+            Plasmoid.configuration.desktopAutomationToken = Utils.uuidv4();
         }
 
         DriverManager.init(DBus.SessionBus, function() {
@@ -4286,16 +4309,12 @@ PlasmoidItem {
             return dataHome + "/plasmallm/screenshots/" + filename;
         });
         
+        // First-run: seed Default when no profiles exist (also if schema was
+        // already bumped without a list, or the config KCM never ran).
+        Profiles.ensureDefault(Plasmoid.configuration, i18n("Default"));
+
         // First-run profile migration
         if (Plasmoid.configuration.profilesSchemaVersion === 0) {
-            var profiles = Profiles.loadProfiles(Plasmoid.configuration);
-            if (profiles.length === 0) {
-                var defaultProfile = Profiles.createProfile(i18n("Default"), Plasmoid.configuration);
-                defaultProfile.id = "p_default";
-                profiles = [defaultProfile];
-                Profiles.saveProfiles(Plasmoid.configuration, profiles);
-                Plasmoid.configuration.activeProfileId = "p_default";
-            }
             Plasmoid.configuration.profilesSchemaVersion = 1;
         }
 
@@ -4525,4 +4544,3 @@ fi
         }
     }
     }
-

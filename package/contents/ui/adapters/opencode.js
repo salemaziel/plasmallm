@@ -24,6 +24,7 @@
 .import "anthropic.js" as Anthropic
 .import "gemini.js" as Gemini
 .import "../opencodeRoute.js" as Route
+.import "../utils.js" as Utils
 
 var id = "opencode";
 var displayName = "OpenCode";
@@ -31,6 +32,23 @@ var displayName = "OpenCode";
 var ZEN_BASE = "https://opencode.ai/zen/v1";
 var GO_BASE = "https://opencode.ai/zen/go/v1";
 var CONSOLE_URL = "https://opencode.ai/auth";
+
+// The gateway wants an x-opencode-session header on every request: one
+// stable ID per conversation when the caller supplies one (opts.sessionId,
+// maintained by main.qml), otherwise a per-call ID (models fetch, one-offs).
+// Delivered to the protocol adapters via the generic opts.extraHeaders path.
+function sessionHeaders(opts) {
+    var h = {};
+    var k;
+    if (opts && opts.extraHeaders) {
+        for (k in opts.extraHeaders) {
+            if (opts.extraHeaders.hasOwnProperty(k))
+                h[k] = opts.extraHeaders[k];
+        }
+    }
+    h["x-opencode-session"] = (opts && opts.sessionId) ? opts.sessionId : Utils.uuidv4();
+    return h;
+}
 
 var presets = [
     { name: "OpenCode Zen", url: ZEN_BASE },
@@ -113,6 +131,7 @@ function copyOpts(opts, extra) {
     var o = _shallowCopy(opts);
     var k;
     o.opencodeAuth = true;
+    o.extraHeaders = sessionHeaders(o);
     if (extra) {
         for (k in extra) {
             if (extra.hasOwnProperty(k))
@@ -137,7 +156,7 @@ function fetchModels(endpoint, apiKey, opts, callback) {
         callback = opts;
         opts = null;
     }
-    return Chat.fetchModels(canonicalBase(endpoint, opts), apiKey, callback);
+    return Chat.fetchModels(canonicalBase(endpoint, opts), apiKey, { extraHeaders: sessionHeaders(opts) }, callback);
 }
 
 // Tools and content are always built in the neutral chat shape; sendStreaming

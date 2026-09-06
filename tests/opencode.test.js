@@ -6,6 +6,7 @@
 // the adapter's actual routing rather than a copy of the rules.
 const fs = require('fs');
 const { UI } = require('./paths');
+const Utils = require('./qmlmodule').load('utils.js');
 const strip = s => s.replace(/^\s*\.import .*$/gm, '');
 
 // The real routing module — pure, no QML or network.
@@ -22,6 +23,7 @@ const GO = 'https://opencode.ai/zen/go/v1';
 // Scripted responses: model -> { chat: {status, body, ok}, anthropic: {...} }
 let script = {};
 let callLog = [];
+let modelFetch;
 
 function makeStrategy(kind) {
   return {
@@ -41,7 +43,9 @@ function makeStrategy(kind) {
     // whole point of the neutral-build invariant below.
     buildTools: o => [{ builtBy: kind }],
     buildContentArray: (t, a) => (a && a.length ? [{ builtBy: kind, text: t }] : t),
-    fetchModels: () => {},
+    fetchModels: (endpoint, apiKey, opts, callback) => {
+      modelFetch = { endpoint, opts, callback };
+    },
   };
 }
 
@@ -49,14 +53,14 @@ function makeStrategy(kind) {
 const i18n = (s, ...a) => a.reduce((acc, v, i) => acc.split(`%${i + 1}`).join(String(v)), s);
 
 const mod = {};
-new Function('module', 'console', 'i18n', 'Chat', 'Anthropic', 'Responses', 'Gemini', 'Route',
+new Function('module', 'console', 'i18n', 'Chat', 'Anthropic', 'Responses', 'Gemini', 'Route', 'Utils',
   strip(fs.readFileSync(UI + '/adapters/opencode.js', 'utf8'))
   + '\nmodule.exports={sendStreaming,protocolFor,fetchModels,buildTools,buildContentArray,'
   + 'toAnthropicTools,toResponsesTools,toGeminiTools,convertMessagesForAnthropic,'
   + 'convertMessagesForResponses,convertMessagesForGemini,explainError,learnedFormats,presets};'
 )(mod, { warn() {} }, i18n,
   makeStrategy('chat'), makeStrategy('anthropic'), makeStrategy('responses'), makeStrategy('gemini'),
-  Route);
+  Route, Utils);
 const OC = mod.exports;
 
 let pass = 0, fail = 0;
@@ -79,6 +83,18 @@ const run = (model, tools, endpoint) => new Promise(res => {
 });
 
 console.log('\nprotocolFor — routing through the real opencodeRoute rules');
+const fetched = () => {};
+OC.fetchModels('https://opencode.ai/zen/go/v1/chat/completions', 'test-key', {
+  sessionId: 'conversation-123', extraHeaders: { 'x-custom': 'kept' }
+}, fetched);
+eq('model fetch retains canonical Go endpoint', modelFetch.endpoint, GO);
+eq('model fetch forwards conversation and custom headers', modelFetch.opts.extraHeaders,
+   { 'x-custom': 'kept', 'x-opencode-session': 'conversation-123' });
+eq('model fetch preserves callback', modelFetch.callback === fetched, true);
+OC.fetchModels(GO, 'test-key', fetched);
+eq('legacy model fetch generates session UUID',
+   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(modelFetch.opts.extraHeaders['x-opencode-session']), true);
+eq('legacy model fetch preserves callback', modelFetch.callback === fetched, true);
 eq('qwen3.7-plus -> anthropic (messages-only)', OC.protocolFor({ endpoint: GO }, 'qwen3.7-plus'), 'anthropic');
 eq('future qwen3.9-plus -> anthropic (family rule)', OC.protocolFor({ endpoint: GO }, 'qwen3.9-plus'), 'anthropic');
 eq('glm-5.3 -> chat (defaulted)', OC.protocolFor({ endpoint: GO }, 'glm-5.3'), 'chat');

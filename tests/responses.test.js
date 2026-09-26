@@ -32,8 +32,14 @@ function load(file, injectNames, injectVals, exportList) {
 
 const Normalizer = load('toolCallNormalizer.js', [], [],
   'repairArguments,normalizeToolCalls,sanitizeStoredToolCallsJson,reconcileToolCallMessages,logNotes');
-const Resp = load('adapters/openai_responses.js', ['ToolManager', 'ToolCallNormalizer'],
-  [{ getEnabledToolsMetadata: () => [] }, Normalizer], 'sendStreaming,buildTools,translateMessages');
+const UtilsStub = {
+  uuidv4: () => "00000000-0000-0000-0000-000000000000",
+  isOpenRouterProvider: () => false,
+  isOpenRouterEndpoint: () => false,
+  applyOpenRouterAttribution: () => {},
+};
+const Resp = load('adapters/openai_responses.js', ['ToolManager', 'ToolCallNormalizer', 'Utils'],
+  [{ getEnabledToolsMetadata: () => [] }, Normalizer, UtilsStub], 'sendStreaming,buildTools,translateMessages');
 
 function stream(events) {
   return new Promise(res => {

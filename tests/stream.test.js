@@ -29,8 +29,14 @@ function FakeXHR() {
 const Normalizer = load('toolCallNormalizer.js', [], [],
   'repairArguments,normalizeToolCalls,sanitizeStoredToolCallsJson,reconcileToolCallMessages,logNotes');
 const ToolManagerStub = { getEnabledToolsMetadata: () => [] };
-const Chat = load('adapters/openai_chat.js', ['ToolManager', 'ToolCallNormalizer'],
-  [ToolManagerStub, Normalizer], 'sendStreaming,parseSSEChunks');
+const UtilsStub = {
+  uuidv4: () => "00000000-0000-0000-0000-000000000000",
+  isOpenRouterProvider: () => false,
+  isOpenRouterEndpoint: () => false,
+  applyOpenRouterAttribution: () => {},
+};
+const Chat = load('adapters/openai_chat.js', ['ToolManager', 'ToolCallNormalizer', 'Utils'],
+  [ToolManagerStub, Normalizer, UtilsStub], 'sendStreaming,parseSSEChunks');
 
 // Replay a list of SSE `data:` payloads, then close the stream.
 function stream(chunks, { truncate = false } = {}) {

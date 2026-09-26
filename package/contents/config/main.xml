@@ -60,6 +60,10 @@
       <label>Route OpenAI-compatible requests through /v1/responses instead of /v1/chat/completions</label>
       <default>false</default>
     </entry>
+    <entry name="openrouterAttribution" type="Bool">
+      <label>Send app-attribution headers (app name and URL only) with OpenRouter requests so usage is credited to PlasmaLLM</label>
+      <default>true</default>
+    </entry>
     <entry name="geminiApiVariant" type="String">
       <label>Gemini API variant: legacy, interactions</label>
       <default>legacy</default>
@@ -494,6 +498,22 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
     <entry name="useCommandTool" type="Bool">
       <label>Use tool calling for command execution</label>
       <default>true</default>
+    </entry>
+    <entry name="commandValidatorEnabled" type="Bool">
+      <label>Validate run_command calls against their justification with a second model</label>
+      <default>false</default>
+    </entry>
+    <entry name="commandValidatorProfileId" type="String">
+      <label>ID of the profile used to validate commands (or 'active' for active chat profile)</label>
+      <default>active</default>
+    </entry>
+    <entry name="commandValidatorBackend" type="String">
+      <label>Validator backend for the chosen profile (auto, decisions, or chat)</label>
+      <default>auto</default>
+    </entry>
+    <entry name="commandValidatorThreshold" type="Double">
+      <label>Maximum mismatch probability the validator may report before a command is rejected</label>
+      <default>0.5</default>
     </entry>
 <entry name="pin" type="Bool">
       <label>Keep panel open when it loses focus</label>

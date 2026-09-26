@@ -345,7 +345,8 @@ function getAdapterChoices() {
         { id: "anthropic", name: _tr(null, "Anthropic") },
         { id: "gemini",    name: _tr(null, "Google Gemini") },
         { id: "opencode",  name: _tr(null, "OpenCode") },
-        { id: "exa",       name: _tr(null, "Exa") }
+        { id: "exa",       name: _tr(null, "Exa") },
+        { id: "decisions", name: _tr(null, "Decisions (TypeSafe / Jev)") }
     ];
 }
 
@@ -363,7 +364,7 @@ function fetchModels(apiType, endpoint, apiKey, usesResponsesAPI, opts, callback
     var ad = Adapters.getAdapter(apiType);
     // openai's fetchModels takes the extra flag; other adapters ignore it.
     if (apiType === "openai") {
-        return ad.fetchModels(endpoint, apiKey, !!usesResponsesAPI, callback);
+        return ad.fetchModels(endpoint, apiKey, !!usesResponsesAPI, opts, callback);
     }
     return ad.fetchModels(endpoint, apiKey, opts, callback);
 }
@@ -392,6 +393,17 @@ function buildContentArray(apiType, text, attachments, usesResponsesAPI, extra) 
 // reasoningSplit.js for why models that inline <think> need this at all.
 function sendStreaming(apiType, opts) {
     return Adapters.getAdapter(apiType).sendStreaming(ReasoningSplit.wrapStreamOpts(opts));
+}
+
+// Single-shot decisions evaluation (TypeSafe / Jev). Returns an abortable
+// XMLHttpRequest when the adapter supports it, otherwise null.
+function sendDecisionChat(apiType, opts, callback) {
+    var ad = Adapters.getAdapter(apiType);
+    if (typeof ad.sendDecisionChat !== "function") {
+        if (callback) callback("Selected adapter does not support decisions", null);
+        return null;
+    }
+    return ad.sendDecisionChat(opts, callback);
 }
 
 // GREEK LETTERS AND MATH SYMBOLS FOR LATEX CHARACTER REPLACEMENT

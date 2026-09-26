@@ -18,6 +18,7 @@
 .import "gemini_interactions.js" as GeminiInteractions
 .import "exa.js" as Exa
 .import "opencode.js" as OpenCode
+.import "decisions.js" as Decisions
 
 function getAdapter(apiType) {
     switch (apiType) {
@@ -33,6 +34,8 @@ function getAdapter(apiType) {
         return GeminiInteractions;
     case "opencode":
         return OpenCode;
+    case "decisions":
+        return Decisions;
     case "openai":
     default:
         return OpenAI;
@@ -44,7 +47,7 @@ function getAdapter(apiType) {
 // sentinel is intentionally not included here — it's a UI affordance.
 function getAllPresets() {
     var out = [];
-    var adapters = [OpenAI, Anthropic, Gemini, GeminiInteractions, Exa, OpenCode];
+    var adapters = [OpenAI, Anthropic, Gemini, GeminiInteractions, Exa, OpenCode, Decisions];
     for (var a = 0; a < adapters.length; a++) {
         var ad = adapters[a];
         if (!ad.presets) continue;

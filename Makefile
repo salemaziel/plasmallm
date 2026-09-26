@@ -32,9 +32,13 @@ test:
 	node tests/wallet_core.mjs
 	node tests/gemini_thinking.mjs
 	node tests/skills.mjs
+	node tests/command_validation.mjs
+	node tests/decisions_adapter.mjs
 	node tests/memory.mjs
 	node tests/path_sandbox.mjs
 	node tests/opencode_route.mjs
+	node tests/openrouter_attribution.mjs
+	node tests/cfg_props.mjs
 	@./tests/run.sh
 	node tests/utils.mjs
 

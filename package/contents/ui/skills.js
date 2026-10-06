@@ -317,7 +317,10 @@ function embedSkillsIndex(description, enabledSkills) {
  * NOT rendered here — it rides in the skill tool's description instead.
  * Returns "" when there is nothing to say at all.
  */
-function buildSystemPromptSection(skills, disabledJson, activeNames) {
+var SKILLS_INTRO_DEFAULT = "If a task matches an available skill, load it with the `skill` tool before using any other tools. " +
+    "The list of available skills is included in the `skill` tool's description.";
+
+function buildSystemPromptSection(skills, disabledJson, activeNames, introOverride) {
     var enabled = filterEnabledSkills(skills, disabledJson);
 
     var activeLookup = {};
@@ -332,8 +335,8 @@ function buildSystemPromptSection(skills, disabledJson, activeNames) {
 
     var out = "\n## Skills\n\n";
     if (enabled.length > 0) {
-        out += "If a task matches an available skill, load it with the `skill` tool before using any other tools. " +
-            "The list of available skills is included in the `skill` tool's description.\n";
+        var intro = (typeof introOverride === "string" && introOverride.trim().length > 0) ? introOverride.trim() : SKILLS_INTRO_DEFAULT;
+        out += intro + "\n";
     }
     if (active.length > 0) {
         out += "\n### Loaded Skill Instructions\n\n" +

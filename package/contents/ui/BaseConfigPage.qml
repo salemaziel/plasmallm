@@ -225,6 +225,12 @@ SimpleKCM {
     property bool cfg_xdgMigrationDoneDefault
     property bool cfg_sysInfoDateTime
     property bool cfg_sysInfoDateTimeDefault
+    property bool cfg_accuracyInstructionsEnabled
+    property bool cfg_accuracyInstructionsEnabledDefault
+    property string cfg_accuracyInstructions
+    property string cfg_accuracyInstructionsDefault
+    property string cfg_promptOverrides
+    property string cfg_promptOverridesDefault
     property string cfg_gatheredSysInfo
     property string cfg_gatheredSysInfoDefault
     property int cfg_apiKeyVersion

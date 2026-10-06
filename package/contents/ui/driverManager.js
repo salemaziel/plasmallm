@@ -308,8 +308,9 @@ function checkDriverSession(callback, keepTokenIfInactive) {
 }
 
 // NOTE: The string below uses template literals (backticks). Any internal markdown backticks MUST be escaped as \` to avoid syntax errors in the QML JS engine.
-function getDrivingInstructions() {
-    if (!isSessionActive) return "";
+// Default desktop-driving text; Settings > System Prompt can override it
+// (promptOverrides key "driving_instructions"). It has no runtime values.
+function getDefaultDrivingInstructions() {
     return `
 ## Desktop Automation
 Interact with the user's desktop (0-1000 coordinate scale).
@@ -361,4 +362,10 @@ When calling any tool, you must include these parameters:
 - \`pending_tasks\`: What remains to be done.
 - \`planned_actions\`: Specific next actions.
 `;
+}
+
+function getDrivingInstructions(override) {
+    if (!isSessionActive) return "";
+    if (typeof override === "string" && override.trim().length > 0) return "\n" + override.trim() + "\n";
+    return getDefaultDrivingInstructions();
 }

@@ -30,6 +30,7 @@ feature, read `journalctl -u plasmashell --follow`.
 | `opencode.test.js` | OpenCode Go's per-model routing across three wire formats, the one-shot fallback, and error attribution — including the 401 that means "wrong endpoint", not "bad key". |
 | `memory.test.js` | The memory store: tolerant parsing, dedupe, the pin budget, eviction that never takes a pinned entry, and TF-IDF recall. |
 | `prompt.test.js` | The assembled system prompt, especially that the memory-archive line stays silent when `recall` has been gated out. |
+| `prompt_overrides.test.js` | `promptOverrides` (Settings > System Prompt): each built-in section is replaceable, blank/missing/bad JSON falls back to the default, `{{tokens}}` substitute, and a tool override changes only that tool's line. |
 | `registry.test.js` | That tools reach `toolManager` at all. A module missing from `tools/index.js` produces no error — the model just never sees the tool. |
 | `shell-roundtrip.test.js` | Memories survive the literal `printf '%s' '<escaped>'` command `main.qml` builds, run through a real bash. Quotes, `$(id -u)`, backslashes, `%s`, newlines. |
 

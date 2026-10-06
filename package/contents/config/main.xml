@@ -284,6 +284,18 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
       <label>Include current date/time in system prompt</label>
       <default>true</default>
     </entry>
+    <entry name="accuracyInstructionsEnabled" type="Bool">
+      <label>Append the accuracy instructions to the system prompt</label>
+      <default>true</default>
+    </entry>
+    <entry name="accuracyInstructions" type="String">
+      <label>Accuracy instructions text (empty = built-in default)</label>
+      <default></default>
+    </entry>
+    <entry name="promptOverrides" type="String">
+      <label>Overrides for built-in system prompt sections (JSON object, key to text; empty = built-in defaults)</label>
+      <default></default>
+    </entry>
     <entry name="gatheredSysInfo" type="String">
       <label>Gathered system information (JSON, written at runtime)</label>
       <default></default>

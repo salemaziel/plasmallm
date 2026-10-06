@@ -47,5 +47,21 @@ const tagged = 'Bot.\n\n{{memories}}\n\n{{tools}}';
 const pt = Api.buildSystemPrompt(SYS, tagged, { memories: mem, toolsConfig: toolsOn });
 eq('placed once, not twice', (pt.match(/## Memory\n/g) || []).length, 1);
 
+console.log('\naccuracy instructions');
+eq('default template carries them', p.indexOf('## Accuracy\n') !== -1, true);
+eq('custom template without the tag still gets them', pc.indexOf('## Accuracy\n') !== -1, true);
+const pa = Api.buildSystemPrompt(SYS, 'Bot.\n\n{{accuracy}}\n\nMore.', { memories: [], toolsConfig: null });
+eq('explicit {{accuracy}} tag places them once', (pa.match(/## Accuracy\n/g) || []).length, 1);
+eq('at the tag, not the end', pa.indexOf('## Accuracy') < pa.indexOf('More.'), true);
+
+const pd = Api.buildSystemPrompt(SYS, custom, { memories: [], toolsConfig: null, accuracyEnabled: false });
+eq('switched off -> absent', pd.indexOf('## Accuracy'), -1);
+const pdt = Api.buildSystemPrompt(SYS, 'Bot.\n{{accuracy}}', { memories: [], toolsConfig: null, accuracyEnabled: false });
+eq('switched off -> tag renders empty', pdt.indexOf('Accuracy'), -1);
+const pcu = Api.buildSystemPrompt(SYS, custom, { memories: [], toolsConfig: null, accuracyText: 'Be exact.' });
+eq('custom text replaces the default', [pcu.indexOf('Be exact.') !== -1, pcu.indexOf('## Accuracy')], [true, -1]);
+const pbl = Api.buildSystemPrompt(SYS, custom, { memories: [], toolsConfig: null, accuracyText: '   ' });
+eq('blank custom text falls back to the default', pbl.indexOf('## Accuracy\n') !== -1, true);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

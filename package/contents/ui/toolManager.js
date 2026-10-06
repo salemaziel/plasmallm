@@ -521,19 +521,45 @@ function _tr(i18nFn, config, str) {
     return res;
 }
 
-function buildSystemPromptSection(config, i18nFn) {
+// Shared intro of the "## Tools" section (promptOverrides key "tools_intro").
+var TOOLS_INTRO_DEFAULT = "The user has pre-authorized you to use the following tools. You can call them directly without asking for permission; the user has explicitly enabled each one.\n\n" +
+    "Auto-run tools execute immediately and return their result to you. Non-auto-run tools will pause for user approval before executing — you should still call them freely, the user will approve interactively.\n\n" +
+    "Enabled tools:";
+
+// Built-in instruction text for one tool, as shown in the "## Tools" list.
+function getDefaultToolInstruction(name) {
+    var tool = TOOLS[name];
+    return tool ? (tool.longDescription || tool.description || "") : "";
+}
+
+// Ids of the registered tools that contribute a line to the "## Tools" section.
+function getPromptToolIds() {
+    var ids = [];
+    for (var id in TOOLS) {
+        if (TOOLS.hasOwnProperty(id) && getDefaultToolInstruction(id).length > 0) ids.push(id);
+    }
+    return ids;
+}
+
+// overrides: parsed promptOverrides map ({ tools_intro, "tool:<id>" }), optional.
+function buildSystemPromptSection(config, i18nFn, overrides) {
     var enabled = getEnabledTools(config);
     if (enabled.length === 0) return "";
     var loc = config && config.localizeSystemPrompt;
+    overrides = overrides || {};
 
     var section = "\n## " + (loc ? _tr(i18nFn, config, "Tools") : "Tools") + "\n";
-    section += (loc
-        ? _tr(i18nFn, config, "The user has pre-authorized you to use the following tools. You can call them directly without asking for permission; the user has explicitly enabled each one.")
-        : "The user has pre-authorized you to use the following tools. You can call them directly without asking for permission; the user has explicitly enabled each one.") + "\n\n";
-    section += (loc
-        ? _tr(i18nFn, config, "Auto-run tools execute immediately and return their result to you. Non-auto-run tools will pause for user approval before executing — you should still call them freely, the user will approve interactively.")
-        : "Auto-run tools execute immediately and return their result to you. Non-auto-run tools will pause for user approval before executing — you should still call them freely, the user will approve interactively.") + "\n\n";
-    section += (loc ? _tr(i18nFn, config, "Enabled tools:") : "Enabled tools:") + "\n";
+    if (typeof overrides.tools_intro === "string" && overrides.tools_intro.trim().length > 0) {
+        section += overrides.tools_intro.trim() + "\n";
+    } else {
+        section += (loc
+            ? _tr(i18nFn, config, "The user has pre-authorized you to use the following tools. You can call them directly without asking for permission; the user has explicitly enabled each one.")
+            : "The user has pre-authorized you to use the following tools. You can call them directly without asking for permission; the user has explicitly enabled each one.") + "\n\n";
+        section += (loc
+            ? _tr(i18nFn, config, "Auto-run tools execute immediately and return their result to you. Non-auto-run tools will pause for user approval before executing — you should still call them freely, the user will approve interactively.")
+            : "Auto-run tools execute immediately and return their result to you. Non-auto-run tools will pause for user approval before executing — you should still call them freely, the user will approve interactively.") + "\n\n";
+        section += (loc ? _tr(i18nFn, config, "Enabled tools:") : "Enabled tools:") + "\n";
+    }
 
     for (var i = 0; i < enabled.length; i++) {
         var id = enabled[i];
@@ -568,7 +594,10 @@ function buildSystemPromptSection(config, i18nFn) {
             details += loc ? _tr(i18nFn, config, ". Max %1 bytes response", httpMax) : (". Max " + httpMax + " bytes response");
         }
 
-        var instruction = getToolInstruction(id, config, i18nFn);
+        var toolOverride = overrides["tool:" + id];
+        var instruction = (typeof toolOverride === "string" && toolOverride.trim().length > 0)
+            ? toolOverride.trim()
+            : getToolInstruction(id, config, i18nFn);
         // Stated after the (possibly user-overridden) instructions so an
         // override cannot accidentally hide how validation behaves.
         if (id === "run_command" && config && config.commandValidatorEnabled) {

@@ -1805,6 +1805,9 @@ PlasmoidItem {
             var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, {
                 i18n: i18n,
                 sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime,
+                accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                accuracyText: Plasmoid.configuration.accuracyInstructions,
+                promptOverrides: Plasmoid.configuration.promptOverrides,
                 autoRunCommands: Plasmoid.configuration.autoRunCommands,
                 autoMode: root.isAutoMode,
                 commandToolEnabled: Plasmoid.configuration.useCommandTool,
@@ -1988,6 +1991,9 @@ PlasmoidItem {
             var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
                 i18n: i18n,
                 sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
+                accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                accuracyText: Plasmoid.configuration.accuracyInstructions,
+                promptOverrides: Plasmoid.configuration.promptOverrides,
                 autoRunCommands: Plasmoid.configuration.autoRunCommands, 
                 autoMode: false, 
                 commandToolEnabled: Plasmoid.configuration.useCommandTool, 
@@ -2563,6 +2569,9 @@ PlasmoidItem {
             var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
                 i18n: i18n,
                 sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
+                accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                accuracyText: Plasmoid.configuration.accuracyInstructions,
+                promptOverrides: Plasmoid.configuration.promptOverrides,
                 autoRunCommands: Plasmoid.configuration.autoRunCommands, 
                 autoMode: root.isAutoMode, 
                 commandToolEnabled: Plasmoid.configuration.useCommandTool,
@@ -2843,6 +2852,9 @@ PlasmoidItem {
                 var autoPrompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
                     i18n: i18n,
                     sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
+                    accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                    accuracyText: Plasmoid.configuration.accuracyInstructions,
+                    promptOverrides: Plasmoid.configuration.promptOverrides,
                     autoRunCommands: Plasmoid.configuration.autoRunCommands, 
                     autoMode: root.isAutoMode, 
                     commandToolEnabled: Plasmoid.configuration.useCommandTool,
@@ -2980,6 +2992,9 @@ PlasmoidItem {
                         var autoPrompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, { 
                             i18n: i18n,
                             sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
+                            accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                            accuracyText: Plasmoid.configuration.accuracyInstructions,
+                            promptOverrides: Plasmoid.configuration.promptOverrides,
                             autoRunCommands: Plasmoid.configuration.autoRunCommands, 
                             autoMode: root.isAutoMode, 
                             commandToolEnabled: Plasmoid.configuration.useCommandTool,
@@ -3257,6 +3272,9 @@ PlasmoidItem {
             var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, {
                 i18n: i18n,
                 sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
+                accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                accuracyText: Plasmoid.configuration.accuracyInstructions,
+                promptOverrides: Plasmoid.configuration.promptOverrides,
                 autoRunCommands: Plasmoid.configuration.autoRunCommands,
                 autoMode: root.isAutoMode,
                 commandToolEnabled: Plasmoid.configuration.useCommandTool,
@@ -4350,6 +4368,9 @@ PlasmoidItem {
                         var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, {
                             i18n: i18n,
                             sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime, 
+                            accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
+                            accuracyText: Plasmoid.configuration.accuracyInstructions,
+                            promptOverrides: Plasmoid.configuration.promptOverrides,
                             autoRunCommands: Plasmoid.configuration.autoRunCommands,
                             autoMode: root.isAutoMode,
                             commandToolEnabled: Plasmoid.configuration.useCommandTool,
@@ -4367,6 +4388,9 @@ PlasmoidItem {
     Connections {
         target: Plasmoid.configuration
         function onSystemPromptChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onAccuracyInstructionsEnabledChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onAccuracyInstructionsChanged() { if (systemPromptReady) initSystemPrompt(); }
+        function onPromptOverridesChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onMemoryEnabledChanged() { if (systemPromptReady) initSystemPrompt(); }
         function onMemoryAutoRunChanged() { if (systemPromptReady) initSystemPrompt(); }
         // Settings edits memories.jsonl in its own QML context and bumps this

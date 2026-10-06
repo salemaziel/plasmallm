@@ -10,9 +10,116 @@ import org.kde.kirigami as Kirigami
 import org.kde.kcmutils
 
 import "api.js" as Api
+import "toolManager.js" as ToolManager
 
 BaseConfigPage {
     id: configPage
+
+    // promptOverrides is a JSON object { key: text }; a missing key means the
+    // built-in default (see Api.PROMPT_DEFAULTS and the tool: keys).
+    function overrideMap() {
+        try {
+            var o = JSON.parse(cfg_promptOverrides || "{}");
+            return (o && typeof o === "object" && !Array.isArray(o)) ? o : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function overrideText(key, defaultText) {
+        var v = overrideMap()[key];
+        return (typeof v === "string" && v.trim().length > 0) ? v : defaultText;
+    }
+
+    function setOverrideText(key, text, defaultText) {
+        var m = overrideMap();
+        // Blank or equal to the default: drop the key so later changes to the
+        // built-in text still reach the user.
+        if (text.trim().length === 0 || text.trim() === defaultText.trim()) delete m[key];
+        else m[key] = text;
+        var json = Object.keys(m).length > 0 ? JSON.stringify(m) : "";
+        if (json !== cfg_promptOverrides) cfg_promptOverrides = json;
+    }
+
+    function toolOverrideModel() {
+        var ids = ToolManager.getPromptToolIds();
+        var cfg = buildToolsConfig();
+        var model = [];
+        for (var i = 0; i < ids.length; i++) {
+            var meta = ToolManager.TOOLS[ids[i]];
+            model.push({
+                key: "tool:" + ids[i],
+                label: (meta && meta.displayName) ? meta.displayName : ids[i],
+                // What the prompt uses without an override here: the Tools-settings text, localized.
+                defaultText: ToolManager.getToolInstruction(ids[i], cfg, i18n),
+                hint: ""
+            });
+        }
+        return model;
+    }
+
+    component OverrideEditor: ColumnLayout {
+        id: editor
+        property string key
+        property string label
+        property string defaultText
+        property string hint
+        Layout.fillWidth: true
+        spacing: Kirigami.Units.smallSpacing
+
+        QQC2.Label {
+            text: editor.label
+            font.bold: true
+        }
+
+        QQC2.TextArea {
+            id: editorArea
+            Layout.fillWidth: true
+            Layout.minimumHeight: Kirigami.Units.gridUnit * 4
+            wrapMode: Text.Wrap
+            font.family: "monospace"
+            font.pointSize: Kirigami.Theme.smallFont.pointSize
+            // Not bound: a blank box must stay blank while the user retypes.
+            function refill() {
+                var t = configPage.overrideText(editor.key, editor.defaultText);
+                if (text !== t) text = t;
+            }
+            Component.onCompleted: refill()
+            Connections {
+                target: configPage
+                function on_InitializedChanged() { editorArea.refill(); }
+                function on_SwitchingProfileChanged() { if (!configPage._switchingProfile) editorArea.refill(); }
+            }
+            onTextChanged: {
+                if (_initialized) {
+                    configPage.setOverrideText(editor.key, text, editor.defaultText);
+                    rootItem.triggerCapture();
+                }
+            }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            spacing: Kirigami.Units.largeSpacing
+
+            QQC2.Button {
+                text: i18n("Reset to default")
+                icon.name: "edit-undo"
+                enabled: editorArea.text.trim() !== editor.defaultText.trim()
+                onClicked: editorArea.text = editor.defaultText
+            }
+
+            QQC2.Label {
+                visible: editor.hint.length > 0
+                text: editor.hint
+                color: Kirigami.Theme.disabledTextColor
+                font: Kirigami.Theme.smallFont
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+            }
+        }
+    }
 
     function buildToolsConfig() {
         return {
@@ -86,6 +193,9 @@ BaseConfigPage {
         return Api.buildSystemPrompt(info, cfg_systemPrompt, {
             i18n: i18n,
             sysInfoDateTime: cfg_sysInfoDateTime,
+            accuracyEnabled: cfg_accuracyInstructionsEnabled,
+            accuracyText: cfg_accuracyInstructions,
+            promptOverrides: cfg_promptOverrides,
             autoRunCommands: cfg_autoRunCommands,
             autoMode: false,
             commandToolEnabled: cfg_useCommandTool,
@@ -278,7 +388,8 @@ BaseConfigPage {
                     { tag: "{{skills}}", desc: i18n("Available skills index and instructions for skills loaded this session (from the Skills settings page)") },
                     { tag: "{{session_multiplexer}}", desc: i18n("Persistent tmux or screen session multiplexer instructions (when active)") },
                     { tag: "{{approval_mode}}", desc: i18n("Notice indicating skip-approvals mode (/auto) is active") },
-                    { tag: "{{driving_instructions}}", desc: i18n("Desktop automation coordinates and guidelines (when driving)") }
+                    { tag: "{{driving_instructions}}", desc: i18n("Desktop automation coordinates and guidelines (when driving)") },
+                    { tag: "{{accuracy}}", desc: i18n("Accuracy instructions from the section below (appended at the end when the tag is absent)") }
                 ]
 
                 delegate: RowLayout {
@@ -298,6 +409,144 @@ BaseConfigPage {
                         wrapMode: Text.Wrap
                         Layout.fillWidth: true
                         Layout.preferredWidth: 1
+                    }
+                }
+            }
+        }
+
+        ColumnLayout {
+            Kirigami.FormData.label: i18n("Accuracy:")
+            Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.CheckBox {
+                text: i18n("Ask every model to answer factually, including sensitive topics")
+                checked: cfg_accuracyInstructionsEnabled
+                onCheckedChanged: {
+                    if (_initialized) {
+                        cfg_accuracyInstructionsEnabled = checked;
+                        rootItem.triggerCapture();
+                    }
+                }
+            }
+
+            QQC2.TextArea {
+                id: accuracyArea
+                Layout.fillWidth: true
+                Layout.minimumHeight: Kirigami.Units.gridUnit * 6
+                enabled: cfg_accuracyInstructionsEnabled
+                wrapMode: Text.Wrap
+                font.family: "monospace"
+                font.pointSize: Kirigami.Theme.smallFont.pointSize
+                // Not bound: a blank box must stay blank while the user retypes.
+                function refill() {
+                    var t = cfg_accuracyInstructions.length > 0 ? cfg_accuracyInstructions : Api.ACCURACY_INSTRUCTIONS;
+                    if (text !== t) text = t;
+                }
+                Component.onCompleted: refill()
+                Connections {
+                    target: configPage
+                    function on_InitializedChanged() { accuracyArea.refill(); }
+                    function on_SwitchingProfileChanged() { if (!configPage._switchingProfile) accuracyArea.refill(); }
+                }
+                onTextChanged: {
+                    if (_initialized) {
+                        // Store blank when it matches the default, so a later
+                        // change to the built-in text still reaches the user.
+                        cfg_accuracyInstructions = (text.trim() === Api.ACCURACY_INSTRUCTIONS) ? "" : text;
+                        rootItem.triggerCapture();
+                    }
+                }
+            }
+
+            QQC2.Button {
+                text: i18n("Reset to default")
+                icon.name: "edit-undo"
+                enabled: cfg_accuracyInstructionsEnabled && cfg_accuracyInstructions.length > 0
+                onClicked: accuracyArea.text = Api.ACCURACY_INSTRUCTIONS
+            }
+
+            QQC2.Label {
+                text: i18n("Added to the end of the system prompt unless you place {{accuracy}} in the template. It cannot get past a provider's content filter, which rejects the request before the model sees it.")
+                color: Kirigami.Theme.disabledTextColor
+                font: Kirigami.Theme.smallFont
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+            }
+        }
+
+        ColumnLayout {
+            Kirigami.FormData.label: i18n("Built-in sections:")
+            Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            spacing: Kirigami.Units.largeSpacing
+
+            QQC2.Label {
+                text: i18n("Text the widget adds to the system prompt on its own. Edit any of it, or reset a section to restore the built-in wording. These edits apply even when the system prompt is localized.")
+                color: Kirigami.Theme.disabledTextColor
+                font: Kirigami.Theme.smallFont
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Layout.preferredWidth: 1
+            }
+
+            Repeater {
+                model: [
+                    { key: "skills", label: i18n("Skills intro"), hint: i18n("Shown under the Skills heading when skills are available.") },
+                    { key: "session_multiplexer", label: i18n("Session multiplexer"), hint: i18n("Tokens: {{multiplexer}}, {{session}}, {{attach_command}}") },
+                    { key: "approval_mode", label: i18n("Skip approvals mode notice"), hint: i18n("Shown only while skip-approvals mode is active.") },
+                    { key: "memory_heading", label: i18n("Memory heading"), hint: "" },
+                    { key: "memory_intro", label: i18n("Memory intro"), hint: "" },
+                    { key: "memory_archive_intro", label: i18n("Memory archive intro"), hint: i18n("Token:") + " %1 " + i18n("(number of archived facts). Shown only when recall is available.") },
+                    { key: "driving_instructions", label: i18n("Desktop driving instructions"), hint: i18n("Shown only while desktop automation is driving.") },
+                    { key: "end_marker", label: i18n("End marker"), hint: i18n("Last line of the system prompt.") }
+                ]
+
+                delegate: OverrideEditor {
+                    key: modelData.key
+                    label: modelData.label
+                    hint: modelData.hint
+                    defaultText: Api.PROMPT_DEFAULTS[modelData.key]
+                }
+            }
+
+            QQC2.Button {
+                text: toolsAdvanced.visible ? i18n("Hide advanced: tool instructions") : i18n("Advanced: tool instructions…")
+                icon.name: "configure"
+                onClicked: toolsAdvanced.visible = !toolsAdvanced.visible
+            }
+
+            ColumnLayout {
+                id: toolsAdvanced
+                visible: false
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.largeSpacing
+
+                QQC2.Label {
+                    text: i18n("Editing these can break tool calling. If a tool stops working, reset its text to the default. An edit here takes precedence over the tool's text in Tools settings.")
+                    color: Kirigami.Theme.neutralTextColor
+                    font: Kirigami.Theme.smallFont
+                    wrapMode: Text.Wrap
+                    Layout.fillWidth: true
+                    Layout.preferredWidth: 1
+                }
+
+                OverrideEditor {
+                    key: "tools_intro"
+                    label: i18n("Tools intro")
+                    defaultText: Api.PROMPT_DEFAULTS.tools_intro
+                    hint: i18n("Shown under the Tools heading, before the tool list.")
+                }
+
+                Repeater {
+                    model: toolsAdvanced.visible ? configPage.toolOverrideModel() : []
+
+                    delegate: OverrideEditor {
+                        key: modelData.key
+                        label: modelData.label
+                        defaultText: modelData.defaultText
+                        hint: ""
                     }
                 }
             }

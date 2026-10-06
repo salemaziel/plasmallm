@@ -400,6 +400,14 @@ function explainError(status, body, fallbackMessage) {
     if (lower.indexOf("regionerror") !== -1 || lower.indexOf("hosted in china") !== -1) {
         return i18n("This model is only served from OpenCode's China-hosted region and needs explicit opt-in on your account. Enable it at %1, or pick a different model.", CONSOLE_URL);
     }
+    // Content filter on China-hosted upstreams (Qwen via Alibaba). Captured
+    // verbatim: a question about Tiananmen Square 1989 to qwen3.8-flash on Go
+    // answers HTTP 400 with the body "event: error\ndata: {}\n\n", while the
+    // same request with harmless text succeeds. The whole history is sent each
+    // turn, so once filtered text is in it, every later message fails too.
+    if (status === 400 && /^\s*event:\s*error\s*\ndata:\s*\{\s*\}\s*$/.test(text)) {
+        return i18n("The model's provider rejected this conversation with no explanation. This is usually a content filter on China-hosted models (Qwen, DeepSeek, MiniMax) reacting to politically sensitive text anywhere in the chat, so every later message will fail the same way. Start a new chat with /clear, or switch to a profile hosted elsewhere, such as Gemini or a GPT model.");
+    }
     if (lower.indexOf("has been deprecated") !== -1) {
         return i18n("OpenCode has retired this model upstream. Pick a newer one — the model list still advertises it, but no backend serves it.");
     }

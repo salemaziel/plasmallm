@@ -299,6 +299,14 @@ eq('tool_call_id preserved through conversion', OC.convertMessagesForGemini([
   eq('401 ModelError is recognised as a wrong-endpoint signal',
      OC.explainError(401, MODEL_ERR, 'x').includes('not a problem with your API key'), true);
 
+  // Captured verbatim: qwen3.8-flash on Go, asked about Tiananmen Square 1989.
+  console.log('\ncaptured — empty 400 from an upstream content filter');
+  const FILTERED = 'event: error\ndata: {}\n\n';
+  eq('empty 400 is explained as a content filter',
+     OC.explainError(400, FILTERED, 'x').includes('content filter'), true);
+  eq('a 400 with a real body falls through',
+     OC.explainError(400, '{"error":{"message":"bad"}}', 'fallback'), 'fallback');
+
   script = { 'oddball': { responses: { status: 401, body: MODEL_ERR }, chat: { status: 200 } } };
   OC.learnedFormats['oddball'] = 'responses';   // pretend a prior turn landed there
   r = await run('oddball');

@@ -1118,13 +1118,11 @@ PlasmaExtras.Representation {
                     onTerminalRequested: function(command) { root.runInTerminal(command); }
                     onStopRequested: function(command, sourceId) { root.stopCommandByText(command, sourceId); }
                     onToolApproved: function(name, args, callId) {
-                        displayMessages.remove(index);
-                        root.executeTool(name, args, callId);
+                        root.resolvePendingToolCall(true, callId, false);
                         inputField.forceActiveFocus();
                     }
                     onToolDenied: function(name, callId) {
-                        displayMessages.remove(index);
-                        root.handleToolOutput(null, "", i18n("The user denied this tool call."), 1, { name: name, callId: callId });
+                        root.resolvePendingToolCall(false, callId, false);
                         inputField.forceActiveFocus();
                     }
                     onImageViewRequested: function(sourceUrl) {

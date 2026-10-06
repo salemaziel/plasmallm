@@ -11,6 +11,7 @@ import org.kde.plasma.components as PlasmaComponents
 import org.kde.plasma.plasma5support as P5Support
 import org.kde.kirigami as Kirigami
 import org.kde.plasma.workspace.dbus as DBus
+import org.kde.notification
 
 import "api.js" as Api
 import "wallet.js" as Wallet
@@ -2782,43 +2783,11 @@ PlasmoidItem {
             return true;
         }
         if (lower === "/approve") {
-            if (root.pendingToolCalls.length > 0 && root.pendingToolCalls[0].type === "tool") {
-                var toolToApprove = root.pendingToolCalls[0];
-                if (root.validatingCallId === toolToApprove.id) {
-                    root.appendDisplayMessage("assistant", i18n("Command validation is still in progress; try again in a moment."), { shared: false });
-                    return true;
-                }
-                // Find and remove the tool_pending card from displayMessages
-                for (var i = displayMessages.count - 1; i >= 0; i--) {
-                    var msg = displayMessages.get(i);
-                    if (msg.role === "tool_pending" && msg.tool_call_id === toolToApprove.id) {
-                        displayMessages.remove(i);
-                        break;
-                    }
-                }
-                executeTool(toolToApprove.name, toolToApprove.args, toolToApprove.id);
-            } else {
-                root.appendDisplayMessage("assistant", i18n("No tool request pending to approve."), { shared: false });
-            }
+            root.resolvePendingToolCall(true, "", false);
             return true;
         }
         if (lower === "/deny") {
-            if (root.pendingToolCalls.length > 0 && root.pendingToolCalls[0].type === "tool") {
-                var toolToDeny = root.pendingToolCalls[0];
-                if (root.validatingCallId === toolToDeny.id)
-                    root.invalidateCommandValidation();
-                // Find and remove the tool_pending card from displayMessages
-                for (var j = displayMessages.count - 1; j >= 0; j--) {
-                    var msgJ = displayMessages.get(j);
-                    if (msgJ.role === "tool_pending" && msgJ.tool_call_id === toolToDeny.id) {
-                        displayMessages.remove(j);
-                        break;
-                    }
-                }
-                handleToolOutput(null, "", i18n("The user denied this tool call."), 1, { name: toolToDeny.name, callId: toolToDeny.id });
-            } else {
-                root.appendDisplayMessage("assistant", i18n("No tool request pending to deny."), { shared: false });
-            }
+            root.resolvePendingToolCall(false, "", false);
             return true;
         }
         if (lower === "/clear") {
@@ -3484,14 +3453,9 @@ PlasmoidItem {
                     if (!root.expanded) {
                         root.hasUnreadResponse = true;
                         Plasmoid.status = PlasmaCore.Types.RequiresAttentionStatus;
-                        var toolNames = [];
-                        for (var i = 0; i < toolCalls.length; i++) {
-                            var tcName = toolCalls[i]["function"] && toolCalls[i]["function"].name;
-                            if (tcName) {
-                                toolNames.push(tcName);
-                            }
-                        }
-                        root.showNotification(i18n("PlasmaLLM: Tool Call"), i18n("Requested tool: %1", toolNames.join(", ")));
+                        // Calls that need approval get their own notification with
+                        // Approve/Deny buttons (notifyToolApproval); auto-run ones
+                        // need nothing from the user.
                     }
 
                     // Categorize all tool calls
@@ -3631,6 +3595,138 @@ PlasmoidItem {
         var escapedMessage = (message || "").replace(/'/g, "'\\''");
         var cmd = "notify-send -- '" + escapedTitle + "' '" + escapedMessage + "'";
         executable.connectSource(cmd);
+    }
+
+    // Approve / Deny from the desktop notification while the panel is closed.
+    // notify-send can't be used: libnotify reports "actions not supported"
+    // against Plasma's server, so this goes through KNotification directly.
+    property var toolApprovalNotification: null
+
+    Component {
+        id: toolApprovalNotificationComponent
+        Notification {
+            id: approvalNote
+            property string callId: ""
+            // False when the body couldn't show every argument; approving
+            // something only partly visible is not offered.
+            property bool canApprove: true
+            property bool closing: false
+            componentName: "plasma_workspace"
+            eventId: "notification"
+            iconName: "dialog-messages"
+            urgency: Notification.HighUrgency
+            flags: Notification.Persistent
+            autoDelete: false
+            // Handlers check the object, not just the id: providers such as
+            // Gemini reuse ids like "call_0" every turn, so a late click on an
+            // already-answered notification could otherwise match a new call.
+            property NotificationAction approveAction: NotificationAction {
+                label: i18n("Approve")
+                onActivated: {
+                    if (root.toolApprovalNotification === approvalNote)
+                        root.resolvePendingToolCall(true, approvalNote.callId, true);
+                }
+            }
+            property NotificationAction denyAction: NotificationAction {
+                label: i18n("Deny")
+                onActivated: {
+                    if (root.toolApprovalNotification === approvalNote)
+                        root.resolvePendingToolCall(false, approvalNote.callId, true);
+                }
+            }
+            actions: canApprove ? [approveAction, denyAction] : [denyAction]
+            defaultAction: NotificationAction {
+                label: i18n("Open chat")
+                onActivated: root.expanded = true
+            }
+            onClosed: {
+                if (root.toolApprovalNotification === approvalNote)
+                    root.toolApprovalNotification = null;
+                if (!approvalNote.closing)
+                    approvalNote.destroy();
+            }
+        }
+    }
+
+    function notifyToolApproval(call) {
+        if (root.expanded || !Plasmoid.configuration.showNotificationsMinimized)
+            return;
+        closeToolApprovalNotification("");
+        var args = call.args || {};
+        var lines = [i18n("Tool: %1", call.name)];
+        for (var key in args) {
+            if (key === "justification") continue;
+            var value = args[key];
+            lines.push(key + ": " + (typeof value === "string" ? value : JSON.stringify(value)));
+        }
+        if (args.justification) lines.push(i18n("Why: %1", String(args.justification)));
+        var text = lines.join("\n");
+        var complete = text.length <= 600;
+        if (!complete)
+            text = text.substring(0, 600) + "…\n" + i18n("Too long to show here; open the chat to approve.");
+        // Plasma renders the body as markup; escape so "2>&1" or "<<EOF"
+        // shows as written.
+        text = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        var note = toolApprovalNotificationComponent.createObject(root, {
+            callId: call.id,
+            canApprove: complete,
+            title: i18n("PlasmaLLM wants to run a tool"),
+            text: text
+        });
+        if (!note) return;
+        root.toolApprovalNotification = note;
+        note.sendEvent();
+    }
+
+    // Closes the approval notification once its call is answered some other
+    // way. An empty callId closes whatever is showing.
+    function closeToolApprovalNotification(callId) {
+        var note = root.toolApprovalNotification;
+        if (!note || (callId && note.callId !== callId))
+            return;
+        root.toolApprovalNotification = null;
+        // close() before Plasma has assigned the notification an id cancels
+        // it without emitting closed, so destroy here rather than in onClosed.
+        note.closing = true;
+        note.close();
+        note.destroy(2000);
+    }
+
+    onPendingToolCallsChanged: {
+        var note = root.toolApprovalNotification;
+        if (!note) return;
+        for (var i = 0; i < root.pendingToolCalls.length; i++) {
+            if (root.pendingToolCalls[i].id === note.callId) return;
+        }
+        closeToolApprovalNotification("");
+    }
+
+    /**
+     * Approves or denies the tool call at the head of the queue, the same way
+     * the approval card does. callId, when given, must still be that head —
+     * a stale notification click must not answer a different call.
+     */
+    function resolvePendingToolCall(approve, callId, fromNotification) {
+        var head = root.pendingToolCalls.length > 0 ? root.pendingToolCalls[0] : null;
+        if (!head || head.type !== "tool" || (callId && head.id !== callId)) {
+            if (!fromNotification)
+                root.appendDisplayMessage("assistant", approve ? i18n("No tool request pending to approve.") : i18n("No tool request pending to deny."), { shared: false });
+            return;
+        }
+        if (approve && root.validatingCallId === head.id) {
+            root.appendDisplayMessage("assistant", i18n("Command validation is still in progress; try again in a moment."), { shared: false });
+            return;
+        }
+        if (!approve && root.validatingCallId === head.id)
+            root.invalidateCommandValidation();
+        var cardIndex = root.findToolPendingIndex(head.id);
+        if (cardIndex >= 0)
+            displayMessages.remove(cardIndex);
+        closeToolApprovalNotification(head.id);
+        if (approve)
+            executeTool(head.name, head.args, head.id, head.turnId);
+        else
+            handleToolOutput(null, "", i18n("The user denied this tool call."), 1, { name: head.name, callId: head.id, turnId: head.turnId || "" });
     }
 
     function cancelRequest() {
@@ -3839,6 +3935,7 @@ PlasmoidItem {
             // auto-run; the user reviews it via the approval card instead.
             var errText = (result && result.error) ? result.error : i18n("empty validator response");
             root.updateValidationCard(displayIndex, call.id, "error", i18n("Could not validate: %1", errText), "", "");
+            root.notifyToolApproval(call);
             return;
         }
 
@@ -3863,6 +3960,7 @@ PlasmoidItem {
             root.executeTool(call.name, call.args, call.id, call.turnId);
         } else {
             root.updateValidationCard(displayIndex, call.id, "passed", "", (result && result.model) || "", result ? result.confidence : "");
+            root.notifyToolApproval(call);
         }
     }
 
@@ -3891,10 +3989,12 @@ PlasmoidItem {
                 toolArgs: JSON.stringify(next.args),
                 shared: false
             });
+            root.notifyToolApproval(next);
         }
     }
 
     function executeTool(name, args, callId, turnId) {
+        closeToolApprovalNotification(callId);
         var toolsConfig = getToolsConfig();
         var tool = ToolManager.getTool(name, toolsConfig);
         if (!tool) {
@@ -4041,6 +4141,7 @@ PlasmoidItem {
         if (!info) {
             return;
         }
+        closeToolApprovalNotification(info.callId);
 
         if (source) delete activeToolCalls[source];
 
@@ -4893,6 +4994,11 @@ fi
             focusSettleTimer.stop();
             root.preventDeactivationClose = false;
             Plasmoid.configuration.lastClosedTimestamp = String(Date.now());
+            // A card already waiting when the panel closes gets a notification too.
+            var waiting = root.pendingToolCalls.length > 0 ? root.pendingToolCalls[0] : null;
+            if (waiting && waiting.type === "tool" && root.validatingCallId === ""
+                    && root.findToolPendingIndex(waiting.id) >= 0)
+                root.notifyToolApproval(waiting);
             if (Plasmoid.status === PlasmaCore.Types.AcceptingInputStatus) {
                 Plasmoid.status = PlasmaCore.Types.ActiveStatus;
             }

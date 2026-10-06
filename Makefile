@@ -117,6 +117,18 @@ do-package:
 
 # Install
 install:
+	@DEST=$(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID); \
+	if [ -L "$$DEST" ] && [ "$(FORCE)" != "1" ]; then \
+		echo "WARNING: $$DEST is a symlink to $$(readlink "$$DEST") (dev install)."; \
+		echo "'make install' replaces it with a static copy, so later edits won't show up after a Plasma restart."; \
+		echo "To keep live edits, cancel and use 'make install-dev' instead."; \
+		if [ -t 0 ]; then \
+			printf "Replace the symlink with a copy? [y/N] "; read ans; \
+			case "$$ans" in [yY]|[yY][eE][sS]) ;; *) echo "Cancelled."; exit 1;; esac; \
+		else \
+			echo "Not running interactively; cancelled. Run 'make install FORCE=1' to do it anyway."; exit 1; \
+		fi; \
+	fi
 	@echo "Installing PlasmaLLM..."
 	@mkdir -p $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)
 	@rm -rf $(HOME)/.local/share/plasma/plasmoids/$(WIDGET_ID)

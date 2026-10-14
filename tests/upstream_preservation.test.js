@@ -30,7 +30,9 @@ check(JSON.stringify(saved) === before);
 
 // Execute the actual QML function body with its runtime dependencies supplied.
 const qml = fs.readFileSync(UI + '/main.qml', 'utf8');
-const start = qml.indexOf('    function initSystemPrompt() {');
+// getSystemPromptOptions sits directly above initSystemPrompt and builds its
+// options object, so the slice starts there.
+const start = qml.indexOf('    function getSystemPromptOptions(overrides) {');
 const end = qml.indexOf('    function regatherSysInfo()', start);
 assert.ok(start >= 0 && end > start);
 const messages = [];
@@ -44,7 +46,8 @@ const context = {
         return 'Prompt with customization';
     } },
     Plasmoid: { configuration: { memoryEnabled: true } },
-    root: { memories, sessionChipText() { return ''; } },
+    root: { memories, isAutoMode: false, ttsAvailable: false,
+        sessionChipText() { return ''; }, effectiveTtsStyleHint() { return ''; } },
     sysInfo: {}, i18n() {}, getToolsConfig() { return {}; },
     systemPromptReady: false,
     sysInfoTimeout: { stop() {} },

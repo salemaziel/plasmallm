@@ -10,3 +10,6 @@ reference/
 __pycache__/
 .omc/
 AGENTS.md
+build/
+PlasmaLLM-standalone-*.tar.gz
+PlasmaLLM-*.flatpak

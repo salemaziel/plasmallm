@@ -81,7 +81,7 @@ const PROFILE_FIELDS = [
     "toolsPathWhitelist",
     "toolsReadMaxBytes", "toolsWriteMaxBytes", "toolsHttpMaxBytes",
     "toolsInstructions",
-    "tasks", "customTools",
+    "customTools",
     "compactionEnabled", "compactionProfileId", "compactionTriggerMode",
     "compactionThresholdChars", "compactionThresholdTurns", "compactionKeepRecentTurns", "compactionInstructions"
 ];
@@ -148,7 +148,6 @@ const PROFILE_DEFAULTS = {
     toolsWriteMaxBytes: 1048576,
     toolsHttpMaxBytes: 524288,
     toolsInstructions: "{}",
-    tasks: "",
     customTools: '[{"name":"echo","description":"Echoes back the message provided.","commandTemplate":"echo {message}","requireSuperuser":false,"autoRun":false}]',
     compactionEnabled: false,
     compactionProfileId: "active",
@@ -376,4 +375,49 @@ function backfillProfiles(profiles) {
         });
     });
     return profiles;
+}
+
+/**
+ * Tasks used to be stored per profile, so switching profiles swapped the task
+ * list. They are now one list for every profile. Combine the current list with
+ * every profile's own list, drop exact repeats, give a same-named task with a
+ * different prompt the profile's name so /task can still tell them apart, and
+ * remove the per-profile copies. Returns { tasks: <JSON string>, profiles }.
+ */
+function mergeProfileTasks(profiles, currentTasksJson) {
+    function parse(v) {
+        if (!v) return [];
+        if (Array.isArray(v)) return v;
+        try {
+            var a = JSON.parse(v);
+            return Array.isArray(a) ? a : [];
+        } catch (e) {
+            return [];
+        }
+    }
+    var merged = [];
+    function add(task, profileName) {
+        if (!task || !task.name) return;
+        var key = String(task.name).toLowerCase();
+        for (var i = 0; i < merged.length; i++) {
+            var m = merged[i];
+            if (String(m.name).toLowerCase() === key) {
+                if (m.prompt === task.prompt) return;
+                if (profileName) {
+                    var copy = JSON.parse(JSON.stringify(task));
+                    copy.name = task.name + " (" + profileName + ")";
+                    add(copy, "");
+                }
+                return;
+            }
+        }
+        merged.push(task);
+    }
+    parse(currentTasksJson).forEach(function(t) { add(t, ""); });
+    var list = Array.isArray(profiles) ? profiles : [];
+    list.forEach(function(p) {
+        parse(p.tasks).forEach(function(t) { add(t, p.name || ""); });
+        delete p.tasks;
+    });
+    return { tasks: JSON.stringify(merged), profiles: list };
 }

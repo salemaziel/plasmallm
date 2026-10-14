@@ -131,9 +131,10 @@ BaseConfigPage {
 
     Component.onCompleted: loadMemories()
 
+    // Not anchored to the page: anchors.fill pinned the form to the window
+    // height, so the page could not scroll and the rows below the list were
+    // drawn on top of it.
     Kirigami.FormLayout {
-        anchors.fill: parent
-
         QQC2.CheckBox {
             id: enabledCheck
             Kirigami.FormData.label: i18n("Long-term memory:")
@@ -248,21 +249,21 @@ BaseConfigPage {
             onActivated: memoryPage.sourceFilter = memoryPage.originValues[currentIndex]
         }
 
-        QQC2.ScrollView {
+        // A plain column, not a fixed-height scroll box: the page itself
+        // scrolls, so the list can never be squeezed under the button below.
+        ColumnLayout {
             Kirigami.FormData.label: ""
+            Layout.fillWidth: true
             Layout.preferredWidth: Kirigami.Units.gridUnit * 28
-            Layout.preferredHeight: Kirigami.Units.gridUnit * 16
             visible: memoryPage.memories.length > 0
+            spacing: Kirigami.Units.smallSpacing
 
-            ListView {
-                id: memoryList
-                clip: true
+            Repeater {
                 model: memoryPage.visibleMemories()
-                spacing: Kirigami.Units.smallSpacing
 
                 delegate: Rectangle {
-                    width: memoryList.width
-                    height: memoryRow.implicitHeight + Kirigami.Units.smallSpacing * 2
+                    Layout.fillWidth: true
+                    implicitHeight: memoryRow.implicitHeight + Kirigami.Units.smallSpacing * 2
                     color: index % 2 === 0 ? "transparent" : Kirigami.Theme.alternateBackgroundColor
                     radius: Kirigami.Units.smallSpacing
 

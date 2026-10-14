@@ -20,6 +20,9 @@ RowLayout {
     property bool editable: true
     property string placeholderText: i18n("Select or enter a model")
     property int maxPopupHeight: Kirigami.Units.gridUnit * 20
+    // { modelId: {input, output, free} } list prices per 1M tokens, from
+    // Usage.priceLabels(); models without an entry show no price.
+    property var modelPrices: ({})
 
     signal fetchRequested()
     signal modelSelected(string model)
@@ -121,9 +124,34 @@ RowLayout {
                                 || String(m).toLowerCase().indexOf(modelSearchField.text.toLowerCase()) !== -1;
                         })
                         delegate: QQC2.ItemDelegate {
+                            id: modelDelegate
                             width: ListView.view.width
                             text: modelData
                             highlighted: ListView.isCurrentItem || modelData === rootPicker.modelName
+                            readonly property var price: (rootPicker.modelPrices && rootPicker.modelPrices[modelData]) || null
+                            contentItem: RowLayout {
+                                spacing: Kirigami.Units.smallSpacing
+                                QQC2.Label {
+                                    Layout.fillWidth: true
+                                    text: modelDelegate.text
+                                    elide: Text.ElideRight
+                                    color: modelDelegate.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                }
+                                QQC2.Label {
+                                    visible: !!modelDelegate.price
+                                    text: !modelDelegate.price ? ""
+                                        : modelDelegate.price.free ? i18n("free")
+                                        : i18n("%1 in · %2 out /1M", modelDelegate.price.input, modelDelegate.price.output)
+                                    font: Kirigami.Theme.smallFont
+                                    opacity: 0.7
+                                    color: modelDelegate.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
+                                }
+                            }
+                            QQC2.ToolTip.text: modelDelegate.price
+                                ? i18n("List price per 1M tokens (models.dev): %1 input, %2 output", modelDelegate.price.input, modelDelegate.price.output)
+                                : ""
+                            QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                            QQC2.ToolTip.visible: hovered && QQC2.ToolTip.text !== ""
                             onClicked: {
                                 rootPicker.modelName = modelData;
                                 rootPicker.modelSelected(modelData);

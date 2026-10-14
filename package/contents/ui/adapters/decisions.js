@@ -195,7 +195,10 @@ function sendDecisionChat(opts, callback) {
             choice: String(a.choice),
             confidence: (typeof a.confidence === "number") ? a.confidence : null,
             probabilities: a.probabilities || {},
-            model: json.model || opts.model || ""
+            model: json.model || opts.model || "",
+            // Raw usage object, if the endpoint sent one (OpenRouter does,
+            // with `cost`); main.qml normalizes it.
+            usage: (json.usage && typeof json.usage === "object") ? json.usage : null
         });
     });
 }

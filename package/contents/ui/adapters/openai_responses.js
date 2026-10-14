@@ -6,6 +6,7 @@
 .import "../toolManager.js" as ToolManager
 .import "../toolCallNormalizer.js" as ToolCallNormalizer
 .import "../utils.js" as Utils
+.import "../usage.js" as Usage
 
 // Responses API strategy for the OpenAI-compatible adapter.
 // Dispatched by openai.js when the active provider speaks /v1/responses
@@ -351,6 +352,12 @@ function parseSSEChunks(buffer, lastIndex) {
                 }
                 break;
             case "response.completed":
+            case "response.incomplete":
+                // Both carry the final response object, usage included;
+                // incomplete is a max_output_tokens stop, still billed.
+                if (obj.response && obj.response.usage) {
+                    tokens.push({ usage: obj.response.usage });
+                }
                 tokens.push({ done: true });
                 break;
             case "response.failed":
@@ -418,6 +425,7 @@ function sendStreaming(opts) {
     var streamDone = false;
     var completeCalled = false;
     var streamError = null;
+    var rawUsage = null;
 
     function processBuffer() {
         if (streamDone) return;
@@ -425,6 +433,7 @@ function sendStreaming(opts) {
         lastParseIndex = result.newIndex;
         for (var i = 0; i < result.tokens.length; i++) {
             var tok = result.tokens[i];
+            if (tok.usage) { rawUsage = tok.usage; continue; }
             if (tok.done) { streamDone = true; continue; }
             if (tok.error) { streamError = tok.error; streamDone = true; continue; }
             if (tok.content) {
@@ -547,6 +556,15 @@ function sendStreaming(opts) {
         completeCalled = true;
         if (pollTimer && pollTimer.running) pollTimer.stop();
         flushPendingThinking();
+
+        if (opts.onUsage) {
+            // A non-streaming reply is a single Response object.
+            if (!rawUsage && !error) {
+                try { rawUsage = JSON.parse(xhr.responseText).usage || null; } catch (e) {}
+            }
+            var usage = Usage.fromResponses(rawUsage);
+            if (usage) opts.onUsage(usage);
+        }
 
         if (error) {
             console.error("PlasmaLLM OpenAI Responses Adapter: onComplete with error:", error);

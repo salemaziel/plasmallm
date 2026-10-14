@@ -207,6 +207,25 @@ function buildTtsSection(options) {
     return header + "\n" + text;
 }
 
+// Words that, in a custom template, stand in for a section's tag: older
+// templates wrote these sections out by hand, so they are not appended again.
+var SECTION_KEYWORDS = {
+    driving_instructions: "desktop automation",
+    approval_mode: "skip approvals mode",
+    skills: "<available_skills>",
+    text_to_speech: "text-to-speech"
+};
+
+// True when `tpl` already places section `tag`: the {{tag}} (spaces inside the
+// braces allowed, as in the replacement below) or its keyword. Settings >
+// System Prompt uses this to say whether a missing section is appended.
+function templateHasSection(tpl, tag) {
+    var lower = String(tpl || "").toLowerCase();
+    if (new RegExp("\\{\\{\\s*" + tag + "\\s*\\}\\}").test(lower)) return true;
+    var kw = SECTION_KEYWORDS[tag];
+    return !!kw && lower.indexOf(kw) !== -1;
+}
+
 // Renders a user-editable system prompt template. {{placeholders}} are replaced with
 // dynamic content; unknown or empty placeholders resolve to "". Critical runtime
 // sections (driving instructions, skip-approvals mode) are appended verbatim if
@@ -289,34 +308,33 @@ function buildSystemPrompt(sysInfo, template, options) {
     };
 
     var tpl = (template && template.trim().length > 0) ? template.trim() : DEFAULT_SYSTEM_PROMPT_TEMPLATE;
-    var tplLower = tpl.toLowerCase();
 
     var out = tpl.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, function(match, name) {
         var key = name.toLowerCase();
         return vars.hasOwnProperty(key) ? vars[key] : "";
     });
 
-    if (drivingText && tplLower.indexOf("{{driving_instructions}}") === -1 && tplLower.indexOf("desktop automation") === -1) {
+    if (drivingText && !templateHasSection(tpl, "driving_instructions")) {
         out += "\n\n" + drivingText;
     }
-    if (approvalText && tplLower.indexOf("{{approval_mode}}") === -1 && tplLower.indexOf("skip approvals mode") === -1) {
+    if (approvalText && !templateHasSection(tpl, "approval_mode")) {
         out += "\n\n" + approvalText;
     }
     // Custom templates written before memory existed have no {{memories}} tag;
     // append rather than silently dropping every saved fact.
-    if (memoriesText && tplLower.indexOf("{{memories}}") === -1) {
+    if (memoriesText && !templateHasSection(tpl, "memories")) {
         out += "\n\n" + memoriesText;
     }
     // Skills are force-appended like the critical runtime sections above:
     // without the index the model can never discover the skill tool's purpose.
-    if (skillsText && tplLower.indexOf("{{skills}}") === -1 && tplLower.indexOf("<available_skills>") === -1) {
+    if (skillsText && !templateHasSection(tpl, "skills")) {
         out += "\n\n" + skillsText;
     }
-    if (ttsText && tplLower.indexOf("{{text_to_speech}}") === -1 && tplLower.indexOf("text-to-speech") === -1) {
+    if (ttsText && !templateHasSection(tpl, "text_to_speech")) {
         out += "\n\n" + ttsText;
     }
 
-    if (accuracyText && tplLower.indexOf("{{accuracy}}") === -1) {
+    if (accuracyText && !templateHasSection(tpl, "accuracy")) {
         out += "\n\n" + accuracyText;
     }
 
@@ -844,9 +862,94 @@ function replaceSymbolsInFormulaFlat(formula) {
     return formula.trim();
 }
 
+// Fenced code blocks: ``` or ~~~ at the start of a line, closed or still open
+// at the end (a reply that is still streaming).
+var FENCE_RE = /(^|\n)[ \t]*(`{3,}|~{3,})[^\n]*\n[\s\S]*?(?:\n[ \t]*\2[ \t]*(?=\r?\n|$)|$)/g;
+
+// Inline code spans in text with the fences already removed: a run of N
+// backticks up to the next run of exactly N, not crossing a blank line. A
+// backtick with no partner is literal text and does not start a span.
+function mapOutsideInlineCode(s, fn) {
+    var out = "";
+    var start = 0;
+    var i = 0;
+    while (i < s.length) {
+        if (s.charAt(i) !== "`") { i++; continue; }
+        var j = i;
+        while (j < s.length && s.charAt(j) === "`") j++;
+        var n = j - i;
+        var k = j;
+        var close = -1;
+        while (k < s.length) {
+            var c = s.charAt(k);
+            if (c === "\n" && /^[ \t\r]*(\n|$)/.test(s.substring(k + 1, k + 64))) break;
+            if (c === "`") {
+                var e = k;
+                while (e < s.length && s.charAt(e) === "`") e++;
+                if (e - k === n) { close = k; break; }
+                k = e;
+                continue;
+            }
+            k++;
+        }
+        if (close < 0) { i = j; continue; }
+        out += fn(s.substring(start, i)) + s.substring(i, close + n);
+        start = i = close + n;
+    }
+    return out + fn(s.substring(start));
+}
+
+// Applies fn to the parts of a message that are not code. Math and line-break
+// handling must not touch code: a regex like ^a$ is not a formula.
+function mapOutsideCode(text, fn) {
+    var out = "";
+    var pos = 0;
+    var m;
+    FENCE_RE.lastIndex = 0;
+    while ((m = FENCE_RE.exec(text)) !== null) {
+        out += mapOutsideInlineCode(text.substring(pos, m.index), fn) + m[0];
+        pos = m.index + m[0].length;
+    }
+    return out + mapOutsideInlineCode(text.substring(pos), fn);
+}
+
 function replaceLatexSymbols(text) {
     if (!text) return "";
-    
+    return mapOutsideCode(text, replaceLatexInProse);
+}
+
+// Markdown joins a single line break into a space. User messages are typed
+// with Shift+Enter line breaks the user expects to see, so make each one a hard
+// break (two trailing spaces). Code is left alone; it keeps its breaks already.
+function keepLineBreaks(text) {
+    if (!text) return "";
+    return mapOutsideCode(text, function(s) {
+        return s.replace(/([^\r\n])(\r?\n)(?!\r?\n)/g, "$1  $2");
+    });
+}
+
+// Qt's Markdown reader marks every line of a fenced code block as unbreakable,
+// so a long line with no spaces runs past the bubble and is cut off. Swap each
+// fence for an HTML <pre> block with pre-wrap: same monospace look, line breaks
+// and indentation kept, but a line too long for the bubble wraps. The table
+// around it is what puts it on its own line; Qt pastes a bare <pre> onto the
+// end of the paragraph before it.
+function wrapCodeBlocks(text) {
+    if (!text) return "";
+    return text.replace(FENCE_RE, function(block, lead, fence) {
+        var body = block.substring(lead.length);
+        body = body.substring(body.indexOf("\n") + 1);
+        var close = new RegExp("\\n?[ \\t]*" + fence.charAt(0) + "{" + fence.length + "}[ \\t]*$");
+        body = body.replace(close, "");
+        var escaped = body.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        return lead + "\n<table width=\"100%\"><tr><td><pre style=\"white-space: pre-wrap;\">"
+            + escaped + "</pre></td></tr></table>\n";
+    });
+}
+
+function replaceLatexInProse(text) {
+    if (!text) return "";
+
     // Temporarily replace escaped dollar and other delimiters
     text = text.replace(/\\(\$)/g, "__ESCAPED_DOLLAR__");
     text = text.replace(/\\([\\\[\]\(\)])/g, function(match, p1) {

@@ -224,10 +224,11 @@ BaseConfigPage {
         });
     }
 
+    // Wrapping text and text boxes below get a small Layout.preferredWidth
+    // and fill the width instead: their implicit width is the longest
+    // unwrapped line, which made the form wider than the settings window.
     Kirigami.FormLayout {
         id: formLayout
-        width: Math.min(parent.width, Kirigami.Units.gridUnit * 32)
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 32
 
         QQC2.CheckBox {
             id: compactionEnabledBox
@@ -239,7 +240,7 @@ BaseConfigPage {
 
         QQC2.Label {
             Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             opacity: 0.75
@@ -258,6 +259,7 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Model Profile:")
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             model: configPage.profileChoices
             textRole: "name"
             onActivated: function(index) {
@@ -270,7 +272,9 @@ BaseConfigPage {
         QQC2.Label {
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
-            wrapMode: Text.WordWrap
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            // Wrap, not WordWrap: an endpoint URL has no spaces to break at.
+            wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             opacity: 0.75
             text: {
@@ -294,6 +298,7 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Trigger Condition:")
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             model: [
                 { id: "chars", name: i18n("By Character Count") },
                 { id: "turns", name: i18n("By Turn Count") },
@@ -315,6 +320,7 @@ BaseConfigPage {
 
         RowLayout {
             Kirigami.FormData.label: i18n("Character threshold:")
+            Layout.fillWidth: true
             visible: compactionEnabledBox.checked && (cfg_compactionTriggerMode !== "turns")
             spacing: Kirigami.Units.smallSpacing
 
@@ -331,11 +337,15 @@ BaseConfigPage {
             QQC2.Label {
                 text: i18n("chars (~%1 tokens)", Math.round(thresholdCharsSpin.value / 4))
                 color: Kirigami.Theme.disabledTextColor
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 6
             }
         }
 
         RowLayout {
             Kirigami.FormData.label: i18n("Turn count interval:")
+            Layout.fillWidth: true
             visible: compactionEnabledBox.checked && (cfg_compactionTriggerMode === "turns" || cfg_compactionTriggerMode === "both")
             spacing: Kirigami.Units.smallSpacing
 
@@ -352,11 +362,15 @@ BaseConfigPage {
             QQC2.Label {
                 text: thresholdTurnsSpin.value === 1 ? i18n("turn (compacts after every turn)") : i18n("turns")
                 color: Kirigami.Theme.disabledTextColor
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 6
             }
         }
 
         RowLayout {
             Kirigami.FormData.label: i18n("Keep recent turns:")
+            Layout.fillWidth: true
             visible: compactionEnabledBox.checked
             spacing: Kirigami.Units.smallSpacing
 
@@ -372,6 +386,9 @@ BaseConfigPage {
             QQC2.Label {
                 text: i18n("full turns kept verbatim and uncompacted")
                 color: Kirigami.Theme.disabledTextColor
+                wrapMode: Text.Wrap
+                Layout.fillWidth: true
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 6
             }
         }
 
@@ -387,6 +404,7 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Instructions template:")
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             Layout.minimumHeight: 140
             wrapMode: TextEdit.Wrap
             text: cfg_compactionInstructions || configPage.defaultInstructions
@@ -413,6 +431,7 @@ BaseConfigPage {
         QQC2.Label {
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             opacity: 0.75
@@ -446,6 +465,7 @@ BaseConfigPage {
 
             QQC2.ScrollView {
                 Layout.fillWidth: true
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 26
                 Layout.minimumHeight: Kirigami.Units.gridUnit * 5
                 Layout.maximumHeight: Kirigami.Units.gridUnit * 8
 
@@ -481,6 +501,7 @@ BaseConfigPage {
 
         Kirigami.InlineMessage {
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             type: configPage.testStatusType
             text: configPage.testStatusMessage
             visible: configPage.testStatusMessage.length > 0 && !configPage.testInProgress
@@ -502,6 +523,7 @@ BaseConfigPage {
 
             QQC2.ScrollView {
                 Layout.fillWidth: true
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 26
                 Layout.minimumHeight: Kirigami.Units.gridUnit * 6
                 Layout.maximumHeight: Kirigami.Units.gridUnit * 12
 

@@ -14,6 +14,7 @@ import org.kde.plasma.workspace.dbus as DBus
 
 import "api.js" as Api
 import "toolManager.js" as ToolManager
+import "usage.js" as Usage
 
 /**
  * Renders a single chat message (user, assistant, tool result, etc.)
@@ -50,6 +51,23 @@ Kirigami.AbstractCard {
     property string validationConfidence: ""
     // JSON payload for decisions verdicts: {choice, confidence, probabilities}
     property string decisionJson: ""
+    // Normalized token usage for the requests behind this reply (usage.js).
+    property string usageJson: ""
+    readonly property var usage: isAssistant ? Usage.parse(usageJson) : null
+    readonly property string usageText: {
+        var u = messageItem.usage;
+        if (!u) return "";
+        var parts = [i18n("%1 in", Usage.formatTokens(u.inputTokens))];
+        if (u.cachedInputTokens > 0)
+            parts[0] += " " + i18n("(%1 cached)", Usage.formatTokens(u.cachedInputTokens));
+        var out = i18n("%1 out", Usage.formatTokens(u.outputTokens));
+        if (u.reasoningTokens > 0)
+            out += " " + i18n("(%1 reasoning)", Usage.formatTokens(u.reasoningTokens));
+        parts.push(out);
+        var cost = Usage.formatCost(u);
+        if (cost) parts.push(cost);
+        return parts.join(" · ");
+    }
     onToolDataJsonChanged: toolExpanded = false
     property bool toolExpanded: false
     property bool thinkingExpanded: false
@@ -63,7 +81,10 @@ Kirigami.AbstractCard {
     readonly property int latexRenderMode: Plasmoid.configuration.latexRenderMode
     readonly property bool isLatexFallback: latexRenderMode === 2 && advancedRenderFailed
 
-    readonly property string displayContent: {
+    readonly property string displayContent: useConsoleStyle ? renderedContent
+        : Api.wrapCodeBlocks(isUser ? Api.keepLineBreaks(renderedContent) : renderedContent)
+
+    readonly property string renderedContent: {
         var mode = latexRenderMode;
         if (mode === 0) {
             return strippedContent;
@@ -932,6 +953,45 @@ Kirigami.AbstractCard {
                         }
                     }
                 }
+            }
+        }
+
+        // Token usage and cost for this reply.
+        PlasmaComponents.Label {
+            id: usageLabel
+            visible: messageItem.usageText.length > 0 && !messageItem.isAwaitingResponse
+            Layout.preferredWidth: messageItem.width * messageItem.bubbleWidthMultiplier
+            Layout.alignment: messageItem.messageAlignment
+            text: messageItem.usageText
+            font: Kirigami.Theme.smallFont
+            opacity: 0.6
+            elide: Text.ElideRight
+
+            PlasmaComponents.ToolTip.text: {
+                var u = messageItem.usage;
+                if (!u) return "";
+                var lines = [
+                    i18n("Input tokens: %1", u.inputTokens),
+                    i18n("Output tokens: %1", u.outputTokens)
+                ];
+                if (u.reasoningTokens > 0) lines.push(i18n("Reasoning tokens (part of output): %1", u.reasoningTokens));
+                if (u.cachedInputTokens > 0) lines.push(i18n("Cached input tokens: %1", u.cachedInputTokens));
+                if (u.cacheWriteTokens > 0) lines.push(i18n("Cache write tokens: %1", u.cacheWriteTokens));
+                if (u.requests > 1) lines.push(i18n("Requests: %1", u.requests));
+                if (u.costSource === "reported")
+                    lines.push(i18n("Cost reported by the provider"));
+                else if (u.costSource === "estimated")
+                    lines.push(i18n("Cost estimated from models.dev list prices"));
+                else
+                    lines.push(i18n("No price known for this model"));
+                if (u.costIncomplete) lines.push(i18n("Some requests had no price; the cost is a lower bound"));
+                return lines.join("\n");
+            }
+            PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+            PlasmaComponents.ToolTip.visible: usageHover.hovered && PlasmaComponents.ToolTip.text !== ""
+
+            HoverHandler {
+                id: usageHover
             }
         }
 

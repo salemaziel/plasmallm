@@ -32,6 +32,7 @@ feature, read `journalctl -u plasmashell --follow`.
 | `prompt.test.js` | The assembled system prompt, especially that the memory-archive line stays silent when `recall` has been gated out. |
 | `prompt_overrides.test.js` | `promptOverrides` (Settings > System Prompt): each built-in section is replaceable, blank/missing/bad JSON falls back to the default, `{{tokens}}` substitute, and a tool override changes only that tool's line. |
 | `registry.test.js` | That tools reach `toolManager` at all. A module missing from `tools/index.js` produces no error — the model just never sees the tool. |
+| `usage.test.js` | Token usage and cost (`usage.js`): each provider's usage shape normalized (cache and reasoning tokens folded in the right way), models.dev provider mapping and price estimates (cache rates, long-context tiers, a reported cost never overwritten), and the adapters driven through a fake XHR — Gemini's repeated totals taken last not summed, Anthropic's start/delta merged, `stream_options` sent only when asked. |
 | `shell-roundtrip.test.js` | Memories survive the literal `printf '%s' '<escaped>'` command `main.qml` builds, run through a real bash. Quotes, `$(id -u)`, backslashes, `%s`, newlines. |
 
 ## Writing one

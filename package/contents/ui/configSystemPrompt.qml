@@ -75,6 +75,7 @@ BaseConfigPage {
         QQC2.TextArea {
             id: editorArea
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             Layout.minimumHeight: Kirigami.Units.gridUnit * 4
             wrapMode: Text.Wrap
             font.family: "monospace"
@@ -207,160 +208,120 @@ BaseConfigPage {
 
     property string promptPreview: buildPreview()
 
-    Kirigami.FormLayout {
-        GridLayout {
-            Kirigami.FormData.label: i18n("System Info:")
-            columns: 2
-            columnSpacing: Kirigami.Units.largeSpacing
-            rowSpacing: 0
+    // The template in use: a blank setting means the built-in default.
+    readonly property string effectiveTemplate: (cfg_systemPrompt && cfg_systemPrompt.trim().length > 0)
+        ? cfg_systemPrompt : Api.DEFAULT_SYSTEM_PROMPT_TEMPLATE
 
-            QQC2.CheckBox {
-                text: i18n("OS")
-                checked: cfg_sysInfoOS
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoOS = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Shell")
-                checked: cfg_sysInfoShell
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoShell = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Hostname")
-                checked: cfg_sysInfoHostname
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoHostname = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Kernel")
-                checked: cfg_sysInfoKernel
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoKernel = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Desktop")
-                checked: cfg_sysInfoDesktop
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoDesktop = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("User")
-                checked: cfg_sysInfoUser
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoUser = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("CPU")
-                checked: cfg_sysInfoCPU
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoCPU = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Memory")
-                checked: cfg_sysInfoMemory
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoMemory = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("GPU")
-                checked: cfg_sysInfoGPU
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoGPU = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Block Devices")
-                checked: cfg_sysInfoDisk
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoDisk = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Network")
-                checked: cfg_sysInfoNetwork
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoNetwork = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Locale")
-                checked: cfg_sysInfoLocale
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoLocale = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
-            QQC2.CheckBox {
-                text: i18n("Date/Time")
-                checked: cfg_sysInfoDateTime
-                onCheckedChanged: {
-                    if (_initialized) {
-                        cfg_sysInfoDateTime = checked;
-                        rootItem.triggerCapture();
-                    }
-                }
-            }
+    readonly property bool anySysInfo: cfg_sysInfoOS || cfg_sysInfoShell || cfg_sysInfoHostname
+        || cfg_sysInfoKernel || cfg_sysInfoDesktop || cfg_sysInfoUser || cfg_sysInfoCPU
+        || cfg_sysInfoMemory || cfg_sysInfoGPU || cfg_sysInfoDisk || cfg_sysInfoNetwork
+        || cfg_sysInfoLocale || cfg_sysInfoDateTime
+
+    // One row per {{tag}}. `on` is whether the feature behind it is turned
+    // on; `onlyWhile` marks sections added only during part of a chat;
+    // `appended` mirrors Api.buildSystemPrompt: those sections are added at
+    // the end when the tag is missing, the others are left out.
+    readonly property var sectionRows: [
+        { tag: "system_info", name: i18n("System details"),
+          what: i18n("The details ticked under System details below."),
+          on: anySysInfo, off: i18n("Off: no System details boxes are ticked."),
+          appended: false },
+        { tag: "memories", name: i18n("Memories"),
+          what: i18n("Your pinned memories from the Memory tab (nothing is added while none are pinned)."),
+          on: cfg_memoryEnabled, off: i18n("Off: long-term memory is turned off in the Memory tab."),
+          appended: true },
+        { tag: "skills", name: i18n("Skills"),
+          what: i18n("The list of available skills from the Skills tab, plus the full instructions of any skill loaded in the chat."),
+          on: cfg_skillsEnabled, off: i18n("Off: skills are turned off in the Skills tab."),
+          appended: true },
+        { tag: "tools", name: i18n("Tools"),
+          what: i18n("How to use each tool turned on in the Tools tab."),
+          on: cfg_enableTools, off: i18n("Off: tools are turned off in the Tools tab."),
+          appended: false },
+        { tag: "session_multiplexer", name: i18n("Persistent session"),
+          what: i18n("Notes on the tmux or screen session commands run in."),
+          on: cfg_useSessionMultiplexer, off: i18n("Off: persistent session is turned off in the Tools tab."),
+          appended: false },
+        { tag: "approval_mode", name: i18n("Skip approvals notice"),
+          what: i18n("Tells the model its commands run without asking you."),
+          on: true, onlyWhile: i18n("only while approvals are skipped (/auto, or a task set to skip approvals)"),
+          appended: true },
+        { tag: "driving_instructions", name: i18n("Desktop control"),
+          what: i18n("Screen coordinates and rules for controlling the desktop."),
+          on: cfg_enableTools && cfg_enableDesktopAutomation, onlyWhile: i18n("only while the model is controlling the desktop"),
+          off: i18n("Off: tools or desktop automation are turned off in the Tools tab."),
+          appended: true },
+        { tag: "accuracy", name: i18n("Accuracy"),
+          what: i18n("The accuracy text under Accuracy below."),
+          on: cfg_accuracyInstructionsEnabled, off: i18n("Off: the Accuracy box below is unticked."),
+          appended: true }
+    ]
+
+    // { text, color } describing what happens to one section right now.
+    function sectionStatus(row) {
+        if (!row.on)
+            return { text: row.off, color: Kirigami.Theme.disabledTextColor };
+        var inTemplate = Api.templateHasSection(effectiveTemplate, row.tag);
+        if (row.onlyWhile) {
+            return {
+                text: inTemplate ? i18n("Added where the tag is, %1.", row.onlyWhile)
+                                 : i18n("Added at the end, %1.", row.onlyWhile),
+                color: Kirigami.Theme.textColor
+            };
+        }
+        if (inTemplate)
+            return { text: i18n("Included where the tag is."), color: Kirigami.Theme.positiveTextColor };
+        if (row.appended)
+            return { text: i18n("Tag not in your prompt, so it is added at the end."), color: Kirigami.Theme.textColor };
+        return { text: i18n("Tag not in your prompt, so it is left out."), color: Kirigami.Theme.negativeTextColor };
+    }
+
+    // How many built-in texts the user has changed (promptOverrides keys),
+    // so edits are visible while the editors are hidden.
+    readonly property int changedBuiltInCount: {
+        var n = 0;
+        try {
+            var o = JSON.parse(cfg_promptOverrides || "{}");
+            if (o && typeof o === "object") n = Object.keys(o).length;
+        } catch (e) {}
+        return n;
+    }
+
+    readonly property var builtInRows: [
+        { key: "skills", label: i18n("Skills intro"), hint: i18n("Shown under the Skills heading when skills are available.") },
+        { key: "session_multiplexer", label: i18n("Persistent session"), hint: i18n("Tokens: {{multiplexer}}, {{session}}, {{attach_command}}") },
+        { key: "approval_mode", label: i18n("Skip approvals notice"), hint: i18n("Shown only while skip approvals (/auto) is on.") },
+        { key: "memory_heading", label: i18n("Memory heading"), hint: "" },
+        { key: "memory_intro", label: i18n("Memory intro"), hint: "" },
+        { key: "memory_archive_intro", label: i18n("Memory archive intro"), hint: i18n("Token:") + " %1 " + i18n("(number of archived facts). Shown only when recall is available.") },
+        { key: "driving_instructions", label: i18n("Desktop control instructions"), hint: i18n("Shown only while the model is controlling the desktop.") },
+        { key: "end_marker", label: i18n("End marker"), hint: i18n("Last line of the system prompt.") },
+        { key: "tools_intro", label: i18n("Tools intro"), hint: i18n("Shown under the Tools heading, before the tool list.") }
+    ]
+
+    // Wrapping labels and text boxes get a small Layout.preferredWidth and
+    // fill the width, so the form never grows wider than the window.
+    Kirigami.FormLayout {
+
+        // --- The template ---------------------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Your prompt")
         }
 
         QQC2.Label {
-            Kirigami.FormData.label: i18n("Template:")
-            Kirigami.FormData.isSection: true
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
-            Layout.topMargin: Kirigami.Units.largeSpacing
-            text: i18n("This is the full system prompt sent to the model. Use {{placeholders}} to pull in dynamic content like system details, enabled tools, or desktop automation instructions. Anything else you write is used verbatim. Critical runtime instructions (driving, skip-approvals mode) are appended automatically when active, even if you remove their placeholder.")
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             wrapMode: Text.Wrap
+            text: i18n("This is the system prompt sent at the start of every message. Write anything you like. Each {{tag}} is swapped for a section the widget builds; the list below says what each one adds, when, and whether it is in your prompt now.")
         }
 
         QQC2.TextArea {
             id: systemPromptArea
-            Kirigami.FormData.label: i18n("System Prompt:")
+            Kirigami.FormData.label: i18n("System prompt:")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             Layout.minimumHeight: Kirigami.Units.gridUnit * 12
             placeholderText: i18n("Write your system prompt here…")
             wrapMode: Text.Wrap
@@ -375,49 +336,132 @@ BaseConfigPage {
             }
         }
 
+        QQC2.Button {
+            text: i18n("Reset to default prompt")
+            icon.name: "edit-undo"
+            onClicked: {
+                if (_initialized) {
+                    var defTpl = cfg_localizeSystemPrompt ? Api.getLocalizedDefaultSystemPromptTemplate(i18n) : Api.DEFAULT_SYSTEM_PROMPT_TEMPLATE;
+                    cfg_systemPrompt = defTpl;
+                    systemPromptArea.text = cfg_systemPrompt;
+                    rootItem.triggerCapture();
+                }
+            }
+        }
+
+        // --- What each tag adds ---------------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("What gets added")
+        }
+
         ColumnLayout {
-            Kirigami.FormData.label: i18n("Placeholders:")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
-            spacing: Kirigami.Units.smallSpacing
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            spacing: Kirigami.Units.largeSpacing
+
+            Repeater {
+                model: configPage.sectionRows
+
+                delegate: RowLayout {
+                    id: sectionRow
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.largeSpacing
+                    readonly property var status: configPage.sectionStatus(modelData)
+
+                    QQC2.Button {
+                        Layout.alignment: Qt.AlignTop
+                        text: "{{" + modelData.tag + "}}"
+                        QQC2.ToolTip.text: i18n("Insert this tag at the cursor")
+                        QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
+                        QQC2.ToolTip.visible: hovered
+                        onClicked: systemPromptArea.insert(systemPromptArea.cursorPosition, "{{" + modelData.tag + "}}")
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Layout.preferredWidth: 1
+                        spacing: 0
+
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: "<b>" + modelData.name + "</b> — " + modelData.what
+                            textFormat: Text.StyledText
+                        }
+                        QQC2.Label {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font: Kirigami.Theme.smallFont
+                            color: sectionRow.status.color
+                            text: sectionRow.status.text
+                        }
+                    }
+                }
+            }
+
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.disabledTextColor
+                text: i18n("Tags are matched with or without spaces inside the braces. Single values such as {{hostname}}, {{os}} or {{datetime}} also work, but stay empty unless that box is ticked under System details. Any other tag becomes empty text. The prompt always ends with the end marker line.")
+            }
+        }
+
+        // --- System details -------------------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("System details")
+        }
+
+        GridLayout {
+            Kirigami.FormData.label: i18n("Include:")
+            columns: 2
+            columnSpacing: Kirigami.Units.largeSpacing
+            rowSpacing: 0
 
             Repeater {
                 model: [
-                    { tag: "{{system_info}}", desc: i18n("Enabled system info selected in the checklist above") },
-                    { tag: "{{tools}}", desc: i18n("Enabled tool descriptions and guidelines from the Tools menu") },
-                    { tag: "{{skills}}", desc: i18n("Available skills index and instructions for skills loaded this session (from the Skills settings page)") },
-                    { tag: "{{session_multiplexer}}", desc: i18n("Persistent tmux or screen session multiplexer instructions (when active)") },
-                    { tag: "{{approval_mode}}", desc: i18n("Notice indicating skip-approvals mode (/auto) is active") },
-                    { tag: "{{driving_instructions}}", desc: i18n("Desktop automation coordinates and guidelines (when driving)") },
-                    { tag: "{{accuracy}}", desc: i18n("Accuracy instructions from the section below (appended at the end when the tag is absent)") }
+                    { key: "sysInfoOS", label: i18n("OS") },
+                    { key: "sysInfoShell", label: i18n("Shell") },
+                    { key: "sysInfoHostname", label: i18n("Hostname") },
+                    { key: "sysInfoKernel", label: i18n("Kernel") },
+                    { key: "sysInfoDesktop", label: i18n("Desktop") },
+                    { key: "sysInfoUser", label: i18n("User") },
+                    { key: "sysInfoCPU", label: i18n("CPU") },
+                    { key: "sysInfoMemory", label: i18n("Memory") },
+                    { key: "sysInfoGPU", label: i18n("GPU") },
+                    { key: "sysInfoDisk", label: i18n("Block Devices") },
+                    { key: "sysInfoNetwork", label: i18n("Network") },
+                    { key: "sysInfoLocale", label: i18n("Locale") },
+                    { key: "sysInfoDateTime", label: i18n("Date/Time") }
                 ]
-
-                delegate: RowLayout {
-                    Layout.fillWidth: true
-                    spacing: Kirigami.Units.largeSpacing
-
-                    QQC2.Button {
-                        text: modelData.tag
-                        icon.name: "list-add"
-                        onClicked: systemPromptArea.insert(systemPromptArea.cursorPosition, modelData.tag)
-                    }
-
-                    QQC2.Label {
-                        text: modelData.desc
-                        color: Kirigami.Theme.disabledTextColor
-                        font: Kirigami.Theme.smallFont
-                        wrapMode: Text.Wrap
-                        Layout.fillWidth: true
-                        Layout.preferredWidth: 1
+                delegate: QQC2.CheckBox {
+                    text: modelData.label
+                    checked: configPage["cfg_" + modelData.key]
+                    onToggled: {
+                        if (_initialized) {
+                            configPage["cfg_" + modelData.key] = checked;
+                            rootItem.triggerCapture();
+                        }
                     }
                 }
             }
         }
 
+        // --- Accuracy -------------------------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Accuracy")
+        }
+
         ColumnLayout {
-            Kirigami.FormData.label: i18n("Accuracy:")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.CheckBox {
@@ -434,6 +478,7 @@ BaseConfigPage {
             QQC2.TextArea {
                 id: accuracyArea
                 Layout.fillWidth: true
+                Layout.preferredWidth: Kirigami.Units.gridUnit * 26
                 Layout.minimumHeight: Kirigami.Units.gridUnit * 6
                 enabled: cfg_accuracyInstructionsEnabled
                 wrapMode: Text.Wrap
@@ -468,7 +513,7 @@ BaseConfigPage {
             }
 
             QQC2.Label {
-                text: i18n("Added to the end of the system prompt unless you place {{accuracy}} in the template. It cannot get past a provider's content filter, which rejects the request before the model sees it.")
+                text: i18n("Safe to reword: this is plain guidance and no feature depends on it. It cannot get past a provider's content filter, which rejects the request before the model sees it.")
                 color: Kirigami.Theme.disabledTextColor
                 font: Kirigami.Theme.smallFont
                 wrapMode: Text.Wrap
@@ -476,55 +521,64 @@ BaseConfigPage {
             }
         }
 
+        // --- Built-in text (advanced) ---------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Built-in text")
+        }
+
         ColumnLayout {
-            Kirigami.FormData.label: i18n("Built-in sections:")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             spacing: Kirigami.Units.largeSpacing
 
             QQC2.Label {
-                text: i18n("Text the widget adds to the system prompt on its own. Edit any of it, or reset a section to restore the built-in wording. These edits apply even when the system prompt is localized.")
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
                 color: Kirigami.Theme.disabledTextColor
                 font: Kirigami.Theme.smallFont
-                wrapMode: Text.Wrap
-                Layout.fillWidth: true
-                Layout.preferredWidth: 1
+                text: configPage.changedBuiltInCount > 0
+                    ? i18n("The wording of the sections above, plus each tool's instructions. You have changed %1 of them.", configPage.changedBuiltInCount)
+                    : i18n("The wording of the sections above, plus each tool's instructions. All are at their defaults.")
             }
 
-            Repeater {
-                model: [
-                    { key: "skills", label: i18n("Skills intro"), hint: i18n("Shown under the Skills heading when skills are available.") },
-                    { key: "session_multiplexer", label: i18n("Session multiplexer"), hint: i18n("Tokens: {{multiplexer}}, {{session}}, {{attach_command}}") },
-                    { key: "approval_mode", label: i18n("Skip approvals mode notice"), hint: i18n("Shown only while skip-approvals mode is active.") },
-                    { key: "memory_heading", label: i18n("Memory heading"), hint: "" },
-                    { key: "memory_intro", label: i18n("Memory intro"), hint: "" },
-                    { key: "memory_archive_intro", label: i18n("Memory archive intro"), hint: i18n("Token:") + " %1 " + i18n("(number of archived facts). Shown only when recall is available.") },
-                    { key: "driving_instructions", label: i18n("Desktop driving instructions"), hint: i18n("Shown only while desktop automation is driving.") },
-                    { key: "end_marker", label: i18n("End marker"), hint: i18n("Last line of the system prompt.") }
-                ]
+            RowLayout {
+                spacing: Kirigami.Units.smallSpacing
 
-                delegate: OverrideEditor {
-                    key: modelData.key
-                    label: modelData.label
-                    hint: modelData.hint
-                    defaultText: Api.PROMPT_DEFAULTS[modelData.key]
+                QQC2.Button {
+                    text: builtInAdvanced.visible ? i18n("Hide built-in text") : i18n("Advanced: edit built-in text…")
+                    icon.name: "configure"
+                    onClicked: builtInAdvanced.visible = !builtInAdvanced.visible
+                }
+
+                QQC2.Button {
+                    text: i18n("Reset all built-in text")
+                    icon.name: "edit-undo"
+                    visible: configPage.changedBuiltInCount > 0
+                    onClicked: {
+                        if (cfg_promptOverrides !== "") {
+                            cfg_promptOverrides = "";
+                            rootItem.triggerCapture();
+                        }
+                        // The editors are not bound to the setting; refill
+                        // them by re-creating the hidden section.
+                        if (builtInAdvanced.visible) {
+                            builtInAdvanced.visible = false;
+                            builtInAdvanced.visible = true;
+                        }
+                    }
                 }
             }
 
-            QQC2.Button {
-                text: toolsAdvanced.visible ? i18n("Hide advanced: tool instructions") : i18n("Advanced: tool instructions…")
-                icon.name: "configure"
-                onClicked: toolsAdvanced.visible = !toolsAdvanced.visible
-            }
-
             ColumnLayout {
-                id: toolsAdvanced
+                id: builtInAdvanced
                 visible: false
                 Layout.fillWidth: true
                 spacing: Kirigami.Units.largeSpacing
 
                 QQC2.Label {
-                    text: i18n("Editing these can break tool calling. If a tool stops working, reset its text to the default. An edit here takes precedence over the tool's text in Tools settings.")
+                    text: i18n("Features depend on this text. A bad edit can stop the model from using tools, memory, skills or desktop control. If something stops working, reset that section here. Edits apply even when the system prompt is localized, and a tool edit here takes precedence over that tool's text in Tools settings.")
                     color: Kirigami.Theme.neutralTextColor
                     font: Kirigami.Theme.smallFont
                     wrapMode: Text.Wrap
@@ -532,15 +586,21 @@ BaseConfigPage {
                     Layout.preferredWidth: 1
                 }
 
-                OverrideEditor {
-                    key: "tools_intro"
-                    label: i18n("Tools intro")
-                    defaultText: Api.PROMPT_DEFAULTS.tools_intro
-                    hint: i18n("Shown under the Tools heading, before the tool list.")
+                // Created only while shown, so they refill from the setting
+                // each time the section opens.
+                Repeater {
+                    model: builtInAdvanced.visible ? configPage.builtInRows : []
+
+                    delegate: OverrideEditor {
+                        key: modelData.key
+                        label: modelData.label
+                        hint: modelData.hint
+                        defaultText: Api.PROMPT_DEFAULTS[modelData.key]
+                    }
                 }
 
                 Repeater {
-                    model: toolsAdvanced.visible ? configPage.toolOverrideModel() : []
+                    model: builtInAdvanced.visible ? configPage.toolOverrideModel() : []
 
                     delegate: OverrideEditor {
                         key: modelData.key
@@ -552,11 +612,19 @@ BaseConfigPage {
             }
         }
 
+        // --- Localization ---------------------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Language")
+            visible: !Qt.locale().name.toLowerCase().startsWith("en")
+        }
+
         ColumnLayout {
             Kirigami.FormData.label: i18n("Localization:")
             visible: !Qt.locale().name.toLowerCase().startsWith("en")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.CheckBox {
@@ -582,24 +650,25 @@ BaseConfigPage {
             }
         }
 
-        QQC2.Button {
-            Kirigami.FormData.label: i18n("Actions:")
-            text: i18n("Reset to Default Template")
-            icon.name: "edit-undo"
-            onClicked: {
-                if (_initialized) {
-                    var defTpl = cfg_localizeSystemPrompt ? Api.getLocalizedDefaultSystemPromptTemplate(i18n) : Api.DEFAULT_SYSTEM_PROMPT_TEMPLATE;
-                    cfg_systemPrompt = defTpl;
-                    systemPromptArea.text = cfg_systemPrompt;
-                    rootItem.triggerCapture();
-                }
-            }
+        // --- Preview --------------------------------------------------------
+
+        Kirigami.Separator {
+            Kirigami.FormData.isSection: true
+            Kirigami.FormData.label: i18n("Preview")
+        }
+
+        QQC2.Label {
+            Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            wrapMode: Text.Wrap
+            font: Kirigami.Theme.smallFont
+            color: Kirigami.Theme.disabledTextColor
+            text: i18n("What the model receives with your current settings. Not shown here: sections added only during part of a chat (skip approvals, desktop control), your memories, and the skills list.")
         }
 
         QQC2.TextArea {
-            Kirigami.FormData.label: i18n("Preview:")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 32
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             Layout.minimumHeight: Kirigami.Units.gridUnit * 14
             readOnly: true
             wrapMode: Text.Wrap

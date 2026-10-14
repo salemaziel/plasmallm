@@ -393,7 +393,11 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Path whitelist:")
             enabled: cfg_enableTools
             spacing: Kirigami.Units.smallSpacing
+            // A modest preferred width; without it the wrapping note below
+            // asks for its whole sentence on one line and the form runs off
+            // the right edge of the window.
             Layout.fillWidth: true
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
 
             function removeAt(idx) {
                 var arr = whitelistPaths.slice();
@@ -450,6 +454,7 @@ BaseConfigPage {
 
             QQC2.Label {
                 Layout.fillWidth: true
+                Layout.preferredWidth: 1
                 text: i18n("Whitelist applies to file-system tools (read, write, list, search). Note: 'run_command' is not restricted by this list.")
                 font: Kirigami.Theme.smallFont
                 color: Kirigami.Theme.disabledTextColor
@@ -580,7 +585,7 @@ BaseConfigPage {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 30
+            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
             spacing: Kirigami.Units.largeSpacing
             enabled: cfg_enableTools
             opacity: enabled ? 1.0 : 0.6

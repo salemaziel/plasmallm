@@ -30,6 +30,7 @@ import "memoryStore.js" as MemoryStore
 import "skills.js" as Skills
 import "memory.js" as Memory
 import "utils.js" as Utils
+import "usage.js" as Usage
 
 PlasmoidItem {
     id: root
@@ -177,6 +178,118 @@ PlasmoidItem {
     property string currentChatFile: ""
     ListModel {
         id: chatMessages
+        // Covers append, retry truncation, clear and history load alike;
+        // callLater coalesces a load's hundreds of appends into one pass.
+        onCountChanged: Qt.callLater(root.refreshChatUsageTotal)
+    }
+
+    // Token usage. Each assistant row in chatMessages stores the usage of the
+    // one request that produced it (usage_json), so the chat total is the sum
+    // of those rows — recomputed from whatever is loaded, never double
+    // counted. The display bubble that ends a reply stores the sum of every
+    // request since the previous visible bubble of the same turn (usageJson):
+    // tool-call rounds with no visible text are carried into the next bubble.
+    // Compaction and command-validator requests are not counted.
+    property var chatUsageTotal: null
+    property var pendingReplyUsage: null   // { turnId, usage }
+    // models.dev data once it has loaded (set in repriceStoredUsage, which
+    // every load runs), so bindings such as the profile menu prices update.
+    property var modelsDevData: null
+
+    // "$x in · $y out /1M" (or "free") for a saved profile, from models.dev;
+    // "" when the profile's connection or model is not listed there.
+    function profilePriceText(p) {
+        var data = root.modelsDevData;
+        if (!data || !p || !p.modelName) return "";
+        var ctx = {
+            apiType: Api.resolvedApiType(p.apiType || "openai", p.geminiApiVariant,
+                                         p.geminiAuthMethod, p.geminiVertexAuthType),
+            endpoint: String(p.apiEndpoint || "").split("?")[0],
+            geminiAuthMethod: p.geminiAuthMethod
+        };
+        var l = Usage.priceLabels(data, ctx, [p.modelName])[p.modelName];
+        if (!l) return "";
+        return l.free ? i18n("free") : i18n("%1 in · %2 out /1M", l.input, l.output);
+    }
+
+    function refreshChatUsageTotal() {
+        var list = [];
+        for (var i = 0; i < chatMessages.count; i++) {
+            var j = chatMessages.get(i).usage_json;
+            if (j) list.push(j);
+        }
+        root.chatUsageTotal = Usage.totalOf(list);
+    }
+
+    // Annotates one request's usage with what is needed to price it now or
+    // later (model + models.dev provider ids), then prices it if the
+    // models.dev data is already loaded.
+    function priceRequestUsage(usage) {
+        if (!usage) return null;
+        var data = Usage.cachedModelsDev();
+        var ctx = {
+            apiType: root.effectiveApiType,
+            // Origin and path only; nothing after "?" is kept.
+            endpoint: String(Plasmoid.configuration.apiEndpoint || "").split("?")[0],
+            geminiAuthMethod: Plasmoid.configuration.geminiAuthMethod
+        };
+        usage.model = Plasmoid.configuration.modelName || "";
+        if (data) {
+            usage.pricing = Usage.pricingProviders(ctx, data);
+        } else {
+            // Provider matching needs the models.dev data too; keep the
+            // connection so repriceStoredUsage() can finish the job, and ask
+            // again in case the startup fetch failed (offline at login).
+            // loadModelsDev's 10-minute failure backoff rate-limits this.
+            usage.pricingCtx = ctx;
+            Usage.loadModelsDev(function(d) {
+                if (d) root.repriceStoredUsage();
+            });
+        }
+        return Usage.priceUsage(usage, data, usage.pricing || [], usage.model);
+    }
+
+    // Adds a request's usage to the reply being built for `turnId`, dropping
+    // leftovers from an earlier turn that ended without a bubble (an error).
+    function accumulateReplyUsage(turnId, usage) {
+        var p = root.pendingReplyUsage;
+        var base = (p && p.turnId === turnId) ? p.usage : null;
+        root.pendingReplyUsage = { turnId: turnId, usage: Usage.addUsage(base, usage) };
+    }
+
+    // JSON for the bubble that just finished, and resets the accumulator.
+    function takeReplyUsageJson(turnId) {
+        var p = root.pendingReplyUsage;
+        root.pendingReplyUsage = null;
+        return (p && p.turnId === turnId && p.usage) ? JSON.stringify(p.usage) : "";
+    }
+
+    // Prices usage recorded before models.dev finished loading (first reply
+    // of a session, or a chat saved offline). Reported costs are untouched.
+    function repriceStoredUsage() {
+        var data = Usage.cachedModelsDev();
+        if (!data) return;
+        root.modelsDevData = data;
+        function reprice(json) {
+            var u = Usage.parse(json);
+            if (!u || !u.model || (u.cost !== null && u.cost !== undefined)) return "";
+            if (u.pricingCtx) {
+                u.pricing = Usage.pricingProviders(u.pricingCtx, data);
+                delete u.pricingCtx;
+            }
+            var priced = Usage.priceUsage(u, data, u.pricing || [], u.model);
+            return priced.cost !== null ? JSON.stringify(priced) : "";
+        }
+        var i, next;
+        for (i = 0; i < chatMessages.count; i++) {
+            next = reprice(chatMessages.get(i).usage_json);
+            if (next) chatMessages.setProperty(i, "usage_json", next);
+        }
+        for (i = 0; i < displayMessages.count; i++) {
+            next = reprice(displayMessages.get(i).usageJson);
+            if (next) displayMessages.setProperty(i, "usageJson", next);
+        }
+        refreshChatUsageTotal();
     }
 
     ListModel {
@@ -211,6 +324,7 @@ PlasmoidItem {
             validationModel: ""
             validationConfidence: ""
             decisionJson: ""
+            usageJson: ""
         }
         Component.onCompleted: clear()
     }
@@ -1366,7 +1480,8 @@ PlasmoidItem {
             validationReason: "",
             validationModel: "",
             validationConfidence: "",
-            decisionJson: ""
+            decisionJson: "",
+            usageJson: ""
         };
         if (extraProps) {
             for (var p in extraProps) {
@@ -2078,6 +2193,7 @@ PlasmoidItem {
         overrides = overrides || {};
         var opts = {
             i18n: i18n,
+            memories: Plasmoid.configuration.memoryEnabled ? root.memories : [],
             sysInfoDateTime: Plasmoid.configuration.sysInfoDateTime,
             accuracyEnabled: Plasmoid.configuration.accuracyInstructionsEnabled,
             accuracyText: Plasmoid.configuration.accuracyInstructions,
@@ -2104,9 +2220,7 @@ PlasmoidItem {
 
     function initSystemPrompt() {
         try {
-            var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, getSystemPromptOptions({
-                memories: Plasmoid.configuration.memoryEnabled ? root.memories : []
-            }));
+            var prompt = Api.buildSystemPrompt(sysInfo, Plasmoid.configuration.systemPrompt, getSystemPromptOptions());
             Plasmoid.configuration.gatheredSysInfo = JSON.stringify(sysInfo);
             if (chatMessages.count > 0) {
                 chatMessages.setProperty(0, "content", prompt);
@@ -2390,7 +2504,8 @@ PlasmoidItem {
                     thinking_blocks_json: m.thinking_blocks_json || "",
                     tts_style_hint: m.tts_style_hint || "",
                     attachments_json: attachJson,
-                    timestamp_api: m.timestamp_api || ""
+                    timestamp_api: m.timestamp_api || "",
+                    usage_json: m.usage_json || ""
                 }));
             } catch (e) {
                 console.warn("PlasmaLLM saveChatJsonl error on api msg " + i + ": " + e);
@@ -2435,7 +2550,8 @@ PlasmoidItem {
                     outputScheme: d.outputScheme || "",
                     tool_call_id: d.tool_call_id || "",
                     callId: d.callId || "",
-                    decisionJson: d.decisionJson || ""
+                    decisionJson: d.decisionJson || "",
+                    usageJson: d.usageJson || ""
                 }));
             } catch (e) {
                 console.warn("PlasmaLLM saveChatJsonl error on display msg " + j + ": " + e);
@@ -2566,7 +2682,9 @@ PlasmoidItem {
                         tool_call_id: data.tool_call_id || "",
                         thinking_blocks_json: data.thinking_blocks_json || "",
                         attachments_json: data.attachments_json || "",
-                        timestamp_api: data.timestamp_api || ""
+                        timestamp_api: data.timestamp_api || "",
+                        // Absent in chats saved before usage tracking.
+                        usage_json: data.usage_json || ""
                     });
 
                     // Trigger background re-read of images for the API model
@@ -2616,13 +2734,19 @@ PlasmoidItem {
                         outputScheme: data.outputScheme || "",
                         tool_call_id: data.tool_call_id || "",
                         callId: data.callId || "",
-                        decisionJson: data.decisionJson || ""
+                        decisionJson: data.decisionJson || "",
+                        usageJson: data.usageJson || ""
                     });
                 }
             } catch(e) {
                 console.warn("Error parsing JSONL line: " + e);
             }
         }
+        // Price rows saved without a cost. Runs at once when models.dev is
+        // cached, otherwise when the fetch lands (subject to its backoff).
+        Usage.loadModelsDev(function(data) {
+            if (data) root.repriceStoredUsage();
+        });
     }
 
     function loadChatJsonl(filePath) {
@@ -3373,13 +3497,19 @@ PlasmoidItem {
                 parts.push(probLines.join(" · "));
             var text = parts.join("\n\n");
 
+            // Decisions endpoints that report usage do it chat-completions
+            // style (OpenRouter, with `cost`).
+            var decisionUsage = root.priceRequestUsage(Usage.fromOpenAIChat(verdict.usage));
+            var decisionUsageJson = decisionUsage ? JSON.stringify(decisionUsage) : "";
+
             var astMsgId = nextMsgId("c");
             chatMessages.append({
                 msgId: astMsgId,
                 turnId: "",
                 role: "assistant",
                 content: text,
-                timestamp_api: Api.localISODateTime()
+                timestamp_api: Api.localISODateTime(),
+                usage_json: decisionUsageJson
             });
             var allowDecSpeech = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && text && text.length > 0;
             if (allowDecSpeech && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
@@ -3392,6 +3522,7 @@ PlasmoidItem {
                 shared: true,
                 apiMsgId: astMsgId,
                 ttsStyleHint: decStyle,
+                usageJson: decisionUsageJson,
                 decisionJson: JSON.stringify({
                     choice: verdict.choice,
                     confidence: verdict.confidence,
@@ -3661,6 +3792,7 @@ PlasmoidItem {
         });
 
         var initiateStreaming = function(effectiveKey) {
+            var requestUsage = null;
             var streamHandle = Api.sendStreaming(root.effectiveApiType, {
                 endpoint: Plasmoid.configuration.apiEndpoint,
                 apiKey: effectiveKey,
@@ -3684,7 +3816,14 @@ PlasmoidItem {
                 geminiLocation: Plasmoid.configuration.geminiLocation,
                 providerName: Plasmoid.configuration.providerName,
                 attribution: Plasmoid.configuration.openrouterAttribution,
+                // Chat Completions only: ask for usage on the stream where
+                // the host is known to accept stream_options.
+                streamUsage: Usage.acceptsStreamOptions(Plasmoid.configuration.apiEndpoint),
                 tools: tools,
+                // Fired by the adapter just before onComplete, once per request.
+                onUsage: function(usage) {
+                    requestUsage = root.priceRequestUsage(usage);
+                },
                 onChunk: function(delta, accumulated) {
                     var suppressText = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && Plasmoid.configuration.ttsWaitUntilReady;
                     if (suppressText && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
@@ -3707,6 +3846,9 @@ PlasmoidItem {
                 activeRequest = null;
                 if (streamPollTimer.running) streamPollTimer.stop();
 
+                var requestUsageJson = requestUsage ? JSON.stringify(requestUsage) : "";
+                if (requestUsage) root.accumulateReplyUsage(currentTurnId, requestUsage);
+
                 // Handle tool calls
                 var limitApplies = enableToolCallLimit && !DriverManager.isSessionActive;
                 if (toolCalls && toolCalls.length > 0 && (!limitApplies || toolCallDepth < maxToolCallDepth)) {
@@ -3720,9 +3862,10 @@ PlasmoidItem {
                         turnId: currentTurnId,
                         role: "assistant", 
                         content: assistantMsg.content || "", 
-                        tool_calls_json: JSON.stringify(toolCalls), 
+                        tool_calls_json: JSON.stringify(toolCalls),
                         thinking_blocks_json: thinkingJson,
                         timestamp_api: Api.localISODateTime(),
+                        usage_json: requestUsageJson
                     });
                     saveChat();
 
@@ -3778,11 +3921,13 @@ PlasmoidItem {
                             if (fullText || hasThinking) {
                                 displayMessages.setProperty(streamingMessageIndex, "content", fullText || "");
                                 displayMessages.setProperty(streamingMessageIndex, "apiMsgId", toolAstMsgId);
+                                displayMessages.setProperty(streamingMessageIndex, "usageJson", root.takeReplyUsageJson(currentTurnId));
                             } else {
+                                // No bubble: the usage carries into the next one.
                                 displayMessages.remove(streamingMessageIndex);
                             }
                         } else if (fullText) {
-                            root.appendDisplayMessage("assistant", fullText, { turnId: currentTurnId, apiMsgId: toolAstMsgId });
+                            root.appendDisplayMessage("assistant", fullText, { turnId: currentTurnId, apiMsgId: toolAstMsgId, usageJson: root.takeReplyUsageJson(currentTurnId) });
                         }
                         streamingMessageIndex = -1;
                         processNextToolCall();
@@ -3818,6 +3963,7 @@ PlasmoidItem {
                         tts_style_hint: effectiveStyle,
                         thinking_blocks_json: regularThinkingJson,
                         timestamp_api: Api.localISODateTime(),
+                        usage_json: requestUsageJson
                     });
                     
                     var allowStreamSpeech = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && fullText && fullText.length > 0;
@@ -3842,7 +3988,7 @@ PlasmoidItem {
                                 notifyText: (!root.expanded) ? fullText : ""
                             };
                         } else {
-                            root.updateDisplayMessage(streamingMessageIndex, null, fullText, { ttsStyleHint: effectiveStyle });
+                            root.updateDisplayMessage(streamingMessageIndex, null, fullText, { ttsStyleHint: effectiveStyle, usageJson: root.takeReplyUsageJson(currentTurnId) });
                             responseReady(streamingMessageIndex);
                         }
                     }
@@ -5062,6 +5208,12 @@ PlasmoidItem {
         // is safe to kick off before the system-info sweep finishes.
         loadMemories();
 
+        // Model prices for usage cost estimates. Fetched once per session in
+        // the background; anything recorded before it lands is priced then.
+        Usage.loadModelsDev(function(data) {
+            if (data) root.repriceStoredUsage();
+        });
+
         // One-time: migrate legacy sttProfileId (chat profile pointer) → dedicated STT fields.
         if (!Plasmoid.configuration.sttMigratedFromProfile) {
             if (!(Plasmoid.configuration.sttApiEndpoint && Plasmoid.configuration.sttApiEndpoint.length > 0)
@@ -5238,6 +5390,16 @@ fi
                 Profiles.saveProfiles(Plasmoid.configuration, profilesV6);
             }
             Plasmoid.configuration.profilesSchemaVersion = 6;
+        }
+
+        // Migration: v6 -> v7 (tasks shared by every profile instead of one
+        // list per profile).
+        if (Plasmoid.configuration.profilesSchemaVersion === 6) {
+            var mergedTasks = Profiles.mergeProfileTasks(
+                Profiles.loadProfiles(Plasmoid.configuration), Plasmoid.configuration.tasks);
+            Plasmoid.configuration.tasks = mergedTasks.tasks;
+            Profiles.saveProfiles(Plasmoid.configuration, mergedTasks.profiles);
+            Plasmoid.configuration.profilesSchemaVersion = 7;
         }
 
         // Seed sysInfo from previous run if available

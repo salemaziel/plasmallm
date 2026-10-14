@@ -6,6 +6,7 @@
 .import "../toolManager.js" as ToolManager
 .import "../toolCallNormalizer.js" as ToolCallNormalizer
 .import "geminiThinking.js" as GeminiThinking
+.import "../usage.js" as Usage
 
 // Native Google Gemini adapter (POST /v1beta/models/{model}:streamGenerateContent
 // ?alt=sse, GET /v1beta/models). Translates the host's OpenAI-shaped neutral
@@ -47,35 +48,21 @@ var STATIC_VERTEX_GEMINI_MODELS = [
     "gemini-3.1-pro-preview"
 ];
 
+// models.dev comes from the shared once-per-session cache in usage.js, which
+// also prices token usage.
 function fetchModelsDev(providerId, filterFn, fallbackList, callback) {
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", "https://models.dev/api.json");
-    xhr.timeout = 10000;
-    xhr.ontimeout = function() {
-        callback(null, fallbackList, 200);
-    };
-    xhr.onreadystatechange = function() {
-        if (xhr.readyState === XMLHttpRequest.DONE) {
-            if (xhr.status === 200) {
-                try {
-                    var data = JSON.parse(xhr.responseText);
-                    var entry = data[providerId];
-                    if (entry && entry.models) {
-                        var ids = Object.keys(entry.models);
-                        if (filterFn) ids = ids.filter(filterFn);
-                        if (ids.length > 0) {
-                            callback(null, ids, 200);
-                            return;
-                        }
-                    }
-                } catch (e) {
-                    // ignore parse error
-                }
+    Usage.loadModelsDev(function(data) {
+        var entry = data && data[providerId];
+        if (entry && entry.models) {
+            var ids = Object.keys(entry.models);
+            if (filterFn) ids = ids.filter(filterFn);
+            if (ids.length > 0) {
+                callback(null, ids, 200);
+                return;
             }
-            callback(null, fallbackList, 200);
         }
-    };
-    xhr.send();
+        callback(null, fallbackList, 200);
+    });
 }
 
 function setHeaders(xhr, apiKey, opts) {
@@ -482,6 +469,10 @@ function parseSSEChunks(buffer, lastIndex) {
                     }
                 }
             }
+            // Running totals, repeated on chunks: the caller keeps the last.
+            if (obj.usageMetadata) {
+                tokens.push({ usage: obj.usageMetadata });
+            }
             if (obj.error) {
                 tokens.push({ error: (obj.error && obj.error.message) || "stream error" });
             }
@@ -555,12 +546,14 @@ function sendStreaming(opts) {
     var accumulatedThinkingText = "";
     var streamError = null;
     var completeCalled = false;
+    var rawUsage = null;
 
     function processBuffer() {
         var result = parseSSEChunks(xhr.responseText, lastParseIndex);
         lastParseIndex = result.newIndex;
         for (var i = 0; i < result.tokens.length; i++) {
             var tok = result.tokens[i];
+            if (tok.usage) { rawUsage = tok.usage; continue; }
             if (tok.error) { streamError = tok.error; continue; }
             if (tok.content) {
                 accumulatedText += tok.content;
@@ -618,6 +611,15 @@ function sendStreaming(opts) {
         if (pollTimer && pollTimer.running) pollTimer.stop();
 
         var collectedThinking = collectThinkingBlocks();
+
+        if (opts.onUsage) {
+            // A non-streaming reply is one GenerateContentResponse.
+            if (!rawUsage && !error) {
+                try { rawUsage = JSON.parse(xhr.responseText).usageMetadata || null; } catch (e) {}
+            }
+            var usage = Usage.fromGemini(rawUsage);
+            if (usage) opts.onUsage(usage);
+        }
 
         if (error) {
             console.error("PlasmaLLM Gemini Adapter: onComplete with error:", error);

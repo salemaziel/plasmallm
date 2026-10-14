@@ -245,7 +245,67 @@ def render_formula(formula, color_hex, cache_dir, is_block, font_size):
 
 import base64
 
+# Fenced code blocks: ``` or ~~~ at the start of a line, closed or still open
+# at the end (a reply that is still streaming).
+FENCE_PATTERN = re.compile(
+    r'(^|\n)[ \t]*(`{3,}|~{3,})[^\n]*\n.*?(?:\n[ \t]*\2[ \t]*(?=\r?\n|$)|$)',
+    re.DOTALL
+)
+BLANK_LINE_AHEAD = re.compile(r'[ \t\r]*(\n|$)')
+
+def map_outside_inline_code(s, fn):
+    # Inline code spans: a run of N backticks up to the next run of exactly N,
+    # not crossing a blank line. A backtick with no partner is literal text.
+    out = []
+    start = i = 0
+    while i < len(s):
+        if s[i] != '`':
+            i += 1
+            continue
+        j = i
+        while j < len(s) and s[j] == '`':
+            j += 1
+        n = j - i
+        k = j
+        close = -1
+        while k < len(s):
+            c = s[k]
+            if c == '\n' and BLANK_LINE_AHEAD.match(s, k + 1):
+                break
+            if c == '`':
+                e = k
+                while e < len(s) and s[e] == '`':
+                    e += 1
+                if e - k == n:
+                    close = k
+                    break
+                k = e
+                continue
+            k += 1
+        if close < 0:
+            i = j
+            continue
+        out.append(fn(s[start:i]))
+        out.append(s[i:close + n])
+        start = i = close + n
+    out.append(fn(s[start:]))
+    return "".join(out)
+
+def map_outside_code(text, fn):
+    # Math inside code is literal text: a regex like ^a$ is not a formula.
+    pos = 0
+    result = []
+    for match in FENCE_PATTERN.finditer(text):
+        result.append(map_outside_inline_code(text[pos:match.start()], fn))
+        result.append(match.group(0))
+        pos = match.end()
+    result.append(map_outside_inline_code(text[pos:], fn))
+    return "".join(result)
+
 def process_text(text, color_hex, cache_dir, font_size):
+    return map_outside_code(text, lambda s: process_math(s, color_hex, cache_dir, font_size))
+
+def process_math(text, color_hex, cache_dir, font_size):
     text = text.replace(r'\$', '__ESCAPED_DOLLAR__')
     
     math_pattern = re.compile(

@@ -22,7 +22,7 @@ make check-translations
 make clean
 ```
 
-There is **no linter and no build step.** `make test` runs `tests/` — plain Node scripts over the `.pragma library` JavaScript (wire formats, SSE parsing, tool-call normalization, the memory store). Node is a development-time requirement only; nothing there ships.
+There is **no linter and no build step.** `make test` runs ten `tests/*.mjs` scripts, then `tests/run.sh` (every `tests/*.test.js`), then `tests/utils.mjs` — plain Node scripts over the `.pragma library` JavaScript (wire formats, SSE parsing, tool-call normalization, the memory store, wallet slots, the command validator, config-page property declarations). Node is a development-time requirement only; nothing there ships.
 
 **QML is not covered and cannot be** — it needs a running shell. For anything touching `main.qml` or a config page, verification is still manual: `make install-dev`, restart Plasma, exercise the feature, and read `journalctl`. Do not claim a change works without doing that or saying you didn't. `make test` passing is not evidence that the widget loads.
 
@@ -32,24 +32,26 @@ There is **no linter and no build step.** `make test` runs `tests/` — plain No
 
 ### The engine: `package/contents/ui/main.qml`
 
-~4300 lines, and it is genuinely the center of the system: chat state, the LLM request/tool loop, KWallet access, shell execution, history I/O, STT orchestration, and system-info gathering all live here. `FullRepresentation.qml` is the panel UI; `ChatMessage.qml` renders a single bubble.
+~4900 lines, and it is genuinely the center of the system: chat state, the LLM request/tool loop, KWallet orchestration, shell execution, history I/O, STT orchestration, and system-info gathering all live here. `FullRepresentation.qml` is the panel UI; `ChatMessage.qml` renders a single bubble.
 
 ### Two parallel message models
 
-`chatMessages` and `displayMessages` (`main.qml:148`) are separate `ListModel`s:
+`chatMessages` and `displayMessages` (near the top of `main.qml`) are separate `ListModel`s:
 
 - **`chatMessages`** — the wire history sent to the provider. Provider-neutral, shaped like OpenAI chat-completions (`role`, `content`, `tool_calls_json`, `tool_call_id`, `thinking_blocks_json`). Index 0 is always the system prompt and is mutated in place when config changes.
 - **`displayMessages`** — what the user sees, including UI-only roles that never reach the LLM: `tool_pending` (approval card), `tool_result_rich`, `error`.
 
-They are correlated by `msgId` / `turnId` / `apiMsgId`, not by index. Edit, retry, share, and compaction all depend on that pairing — see `findChatIndexForDisplayIndex()` (`main.qml:1063`) before touching either model.
+They are correlated by `msgId` / `turnId` / `apiMsgId`, not by index. Edit, retry, share, and compaction all depend on that pairing — see `findChatIndexForDisplayIndex()` in `main.qml` before touching either model.
 
 ### Provider abstraction
 
 `api.js` → `adapters/index.js` → `adapters/<id>.js`, selected by `Plasmoid.configuration.apiType`. Every adapter exposes the same surface: `id`, `displayName`, `capabilities`, `presets`, `fetchModels`, `buildTools`, `buildContentArray`, `sendStreaming`.
 
-The neutral internal format is the OpenAI shape; non-OpenAI adapters translate on the way out (e.g. `anthropic.js:142 translateMessages()` folds `tool` messages into user `tool_result` blocks and re-sends signed thinking blocks). `openai.js` is a dispatcher, not an implementation — it routes to `openai_chat.js` (`/v1/chat/completions`) or `openai_responses.js` (`/v1/responses`) based on `usesResponsesAPI`, which each preset annotates.
+The neutral internal format is the OpenAI shape; non-OpenAI adapters translate on the way out (e.g. `translateMessages()` in `anthropic.js` folds `tool` messages into user `tool_result` blocks and re-sends signed thinking blocks). `openai.js` is a dispatcher, not an implementation — it routes to `openai_chat.js` (`/v1/chat/completions`) or `openai_responses.js` (`/v1/responses`) based on `usesResponsesAPI`, which each preset annotates.
 
-Streaming is hand-rolled: raw `XMLHttpRequest`, incremental SSE buffer parsing at `readyState === 3`. There is no SDK. Adding a provider means writing the wire format and the SSE parser yourself.
+Other adapters: `gemini_interactions.js` (Gemini's stateful Interactions API, chosen through the Gemini API variant rather than its own settings entry), `exa.js`, and `decisions.js`, which sets `chatMode: "decisions"` — no text generation and no tools; `main.qml` branches on it, and it also serves as a command-validator backend. `gemini.js` pulls its thinking-config logic from `geminiThinking.js`. `Api.sendStreaming` wraps every call's options with `reasoningSplit.js` (`wrapStreamOpts`), which splits inline `<think>` text out of the answer. `adapters/index.js` has a harmless duplicate `case "opencode"` in `getAdapter()`.
+
+Streaming is hand-rolled: raw `XMLHttpRequest`, incremental SSE buffer parsing at `readyState === 3`. There is no SDK. Adding a provider means writing the wire format and the SSE parser yourself, adding a `case` to `adapters/index.js`, and adding an entry to `getAdapterChoices()` in `api.js` so it shows up in settings.
 
 `opencode.js` is the exception to "one adapter, one wire format": OpenCode Zen and Go are gateways whose models are split across chat completions, Responses, Anthropic `/messages` and Gemini `generateContent`, so it delegates per model to `openai_chat.js`, `openai_responses.js`, `anthropic.js` or `gemini.js`. It sets `opts.opencodeAuth`, and those adapters rewrite their own URLs and headers for the gateway (see `anthropic.js`'s `/v1` guard and `gemini.js`'s Zen path).
 
@@ -78,37 +80,37 @@ Registry is `tools/index.js` (module + optional config QML page per tool). `tool
 
 **Read `package/contents/ui/tools/TOOLS.md` before adding or modifying a tool** — it documents the module contract (`sandboxed`, `sideEffect`, `outputScheme`, `uiHidden`), the security model, and the `context` object passed to `execute()`.
 
-The loop: `sendToLLM()` (`main.qml:2944`) → provider returns `tool_calls` → queued into `root.pendingToolCalls` → `processNextToolCall()` (`main.qml:3381`) either auto-runs or pushes a `tool_pending` approval card → `executeTool()` → `handleToolOutput()` (`main.qml:3524`) appends a `tool` message → back to `sendToLLM()`. Tool results must round-trip through `chatMessages` or the provider will reject the next request.
+The loop (all in `main.qml`): `sendToLLM()` → provider returns `tool_calls` → queued into `root.pendingToolCalls` → `processNextToolCall()` → for `run_command` with `commandValidatorEnabled` on, `shouldValidateToolCall()` / `beginCommandValidation()` first send the command and its justification to a separate LLM call (`commandValidator.js`) and wait for the verdict → the call either auto-runs or pushes a `tool_pending` approval card → `executeTool()` → `handleToolOutput()` appends a `tool` message → back to `sendToLLM()`. Tool results must round-trip through `chatMessages` or the provider will reject the next request. The tool-call depth limit (`maxToolCallDepth`) is waived while a desktop-driver session is active.
 
-Security layers, all enforced client-side before execution: enabled-vs-auto-run per tool, path whitelist for `sandboxed` tools (`ToolManager.isPathAllowed`), a required `justification` argument on system-touching tools, and home-path redaction (`contractAllPaths`) so results never leak the username back to the LLM.
+Security layers, all client-side before execution: enabled-vs-auto-run per tool, path whitelist for `sandboxed` tools (`ToolManager.isPathAllowed`), the command validator on `run_command` (when enabled), a `justification` argument that system-touching tools' schemas mark as required (only the schema asks for it — nothing rejects a call that omits it), and home-path redaction (`contractAllPaths`) so results never leak the username back to the LLM.
 
 ### Shell execution
 
-`P5Support.DataSource { engine: "executable" }` — two instances: `executable` (`main.qml:1343`) for internal commands and `toolsExec` for tool calls. **The source key is the command string itself.** `onNewData` dispatches by checking which bookkeeping array/map contains that source (`pendingSysInfoCommands`, `terminalCommands`, `saveCommands`, `historyFetchCommands`, …). Identical command strings collide, which is why commands embed generated markers and `mktemp` paths. Always register a new command in the right bookkeeping structure and `disconnectSource()` when done.
+`P5Support.DataSource { engine: "executable" }` — `main.qml` has ten. The two that matter most are `executable` for internal commands and `toolsExec` for tool calls; the rest are single-purpose (`fileReader`, `gcloudTokenSource`, LaTeX and STT helpers). **The source key is the command string itself.** `onNewData` dispatches by checking which bookkeeping array/map contains that source (`pendingSysInfoCommands`, `terminalCommands`, `saveCommands`, `historyFetchCommands`, …). Identical command strings collide, which is why commands embed generated markers and `mktemp` paths. Always register a new command in the right bookkeeping structure and `disconnectSource()` when done.
 
 `sessionRunner.js` optionally wraps `run_command` in a tmux/screen session so long-running commands stream into a real terminal.
 
 ### Secrets
 
-API keys live in **KWallet only**, never in config. Access is async D-Bus (`walletCall()`, `main.qml:1971`) against folder `PlasmaLLM` in `kdewallet`. Slot names are computed in `api.js` (`chatKeySlot` / `searchKeySlot` / `sttKeySlot`, plus legacy-slot parsers and `migrateApiKeySlotScheme()` for the scheme migration). Changing a slot-naming function silently orphans users' stored keys — extend the legacy readers instead.
+API keys live in **KWallet** (folder `PlasmaLLM` in `kdewallet`). When the wallet can't store a key, it falls back to `apiKeysFallback` in config — a JSON map of slot → **plaintext** key, scrubbed for that slot after a later successful wallet write. The legacy single `apiKey` config entry is the last fallback on read. Wallet access is `wallet.js` (async D-Bus client for `org.kde.kwalletd6`: `call`, `withOpen`, `readKey`, `writeKey`, …); `walletCore.js` holds slot naming, the fallback map, and the legacy-slot lists. Slot names look like `v2|chat|…`, `v2|search|…`, `v2|stt|…` (`chatKeySlot` / `searchKeySlot` / `sttKeySlot` in `walletCore.js`; the `api.js` functions of the same name are thin wrappers). `migrateApiKeySlotScheme()` in `main.qml` copies old slots forward up to `KEY_SLOT_SCHEME_VERSION` (3). Changing a slot-naming function in `walletCore.js` silently orphans users' stored keys — extend the legacy readers instead.
 
 ### Configuration
 
-`package/contents/config/main.xml` holds ~155 entries in a single `General` group; `config/config.qml` lists the config pages. Read anywhere via `Plasmoid.configuration.<key>`.
+`package/contents/config/main.xml` holds ~185 entries in a single `General` group; `config/config.qml` lists the config pages. Read anywhere via `Plasmoid.configuration.<key>`.
 
-Adding a setting usually means three edits: the `main.xml` entry, a control on the relevant `config*.qml` page, and — if it affects the system prompt — a handler in the long `Connections` block at the end of `main.qml` (`main.qml:3871`+) that calls `initSystemPrompt()`. `BaseConfigPage.qml` is the shared page shell.
+Adding a setting usually means these edits: the `main.xml` entry; `property <type> cfg_<key>` and `cfg_<key>Default` in `BaseConfigPage.qml`, the shared page shell (`tests/cfg_props.mjs` fails if any page references a `cfg_` name not declared there); a control on the relevant `config*.qml` page; and — if it affects the system prompt — a handler in the long `Connections` block at the end of `main.qml` that calls `initSystemPrompt()`.
 
-`profiles.js` layers named provider profiles on top of that flat config: `applyToConfig`/`captureFromConfig` sync a profile object with `Plasmoid.configuration`, and the `*FromKCM`/`*ToKCM` variants do the same against a live config page.
+`profiles.js` layers named provider profiles on top of that flat config: `applyToConfig`/`captureFromConfig` sync a profile object with `Plasmoid.configuration`, and the `*FromKCM`/`*ToKCM` variants do the same against a live config page. A per-profile setting must also be added to `PROFILE_FIELDS` and `PROFILE_DEFAULTS` there.
 
 ### System prompt
 
-Composed by `Api.buildSystemPrompt()` from system info, the user template, `ToolManager.buildSystemPromptSection()`, session-multiplexer and approval-mode sections, and `DriverManager.getDrivingInstructions()`. Rebuilt whenever a relevant config key changes, and written back into `chatMessages` index 0.
+Composed by `Api.buildSystemPrompt()` from system info, the user template, `ToolManager.buildSystemPromptSection()`, session-multiplexer and approval-mode sections, and `DriverManager.getDrivingInstructions()` (empty unless a desktop-driver session is active). Rebuilt whenever a relevant config key changes, and written back into `chatMessages` index 0.
 
 ### History and compaction
 
-Chats are JSONL at `$XDG_DATA_HOME/plasmallm/chats/*.jsonl` (v2: `_type` of `meta` / `compaction` / `api` / `display`). `legacyChatLoader.js` reads v1 files and synthesizes the turn metadata they lack. `contextCompactor.js` summarizes older turns through a separately-configured endpoint (`configCompaction.qml`) to shrink the context.
+Chats are JSONL at `$XDG_DATA_HOME/plasmallm/chats/*.jsonl` (v2: `_type` of `meta` / `compaction` / `api` / `display`), auto-saved only when `saveChatHistory` is on — it defaults to off; `saveChat(true)` forces a save regardless. `legacyChatLoader.js` reads v1 files and synthesizes the turn metadata they lack. `contextCompactor.js` summarizes older turns through the provider profile chosen by `compactionProfileId` (default: the active profile; set in `configCompaction.qml`) to shrink the context.
 
-Compaction is lossy in the prompt but not in storage: the summary is required to cite message ids, and its footer tells the model it can pull the verbatim text back with `restore_context` (or a file's contents with `recall_attachment`). That citation-plus-retrieval pattern is the model for anything else that has to shrink context.
+Compaction is lossy in the prompt but not in storage: the summary is required to cite messages, by their `chatMessages` row index (`[i]`) — `getMessagesRange()` in `main.qml` accepts an index, `msg_<n>`, or a `msgId` — and its footer tells the model it can pull the verbatim text back with `restore_context` (or a file's contents with `recall_attachment`). That citation-plus-retrieval pattern is the model for anything else that has to shrink context.
 
 ### Long-term memory
 
@@ -134,7 +136,7 @@ Three invariants worth keeping: a pin over budget is **refused and reported**, n
 
 ## Conventions
 
-- QML JS dialect: `var` declarations and the `function` keyword — no arrow functions, no `let`/`const`.
+- QML JS dialect: `var` declarations and the `function` keyword — no arrow functions, no `let`/`const`. Existing code breaks this in places (arrow functions in `main.qml`, `profiles.js` and several config pages; `const`/`let` in `profiles.js`); don't copy those spots. `getDrivingInstructions()` in `driverManager.js` is a deliberate template literal.
 - Shared JS libraries use `.pragma library` and cross-import with `.import "x.js" as X`. `.pragma library` files cannot touch QML objects, which is why anything needing `Plasmoid.configuration` takes it as an argument (`config`, `opts`, `context`).
 - Theme colors come from `Kirigami.Theme`, never hardcoded.
 - Import order: Qt, KDE Plasma, P5Support, Kirigami, local JS.

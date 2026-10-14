@@ -63,5 +63,13 @@ eq('custom text replaces the default', [pcu.indexOf('Be exact.') !== -1, pcu.ind
 const pbl = Api.buildSystemPrompt(SYS, custom, { memories: [], toolsConfig: null, accuracyText: '   ' });
 eq('blank custom text falls back to the default', pbl.indexOf('## Accuracy\n') !== -1, true);
 
+console.log('\ntags with spaces inside the braces');
+const count = (s, sub) => s.split(sub).length - 1;
+const spaced = Api.buildSystemPrompt(SYS, 'Hi.\n{{ accuracy }}', { memories: [], toolsConfig: null });
+eq('spaced {{ accuracy }} is filled in place, not appended again', count(spaced, '## Accuracy\n'), 1);
+eq('page check: spaced tag counts as present', Api.templateHasSection('x {{ memories }}', 'memories'), true);
+eq('page check: keyword stands in for driving tag', Api.templateHasSection('Desktop automation rules', 'driving_instructions'), true);
+eq('page check: missing tag', Api.templateHasSection('Hi.', 'tools'), false);
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

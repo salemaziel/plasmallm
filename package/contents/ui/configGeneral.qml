@@ -16,6 +16,7 @@ import "wallet.js" as Wallet
 import "walletCore.js" as WalletCore
 import "profiles.js" as Profiles
 import "utils.js" as Utils
+import "usage.js" as Usage
 
 BaseConfigPage {
     id: configPage
@@ -77,6 +78,14 @@ BaseConfigPage {
 
     property var modelCache: ({})
     property var availableModels: []
+    // Parsed models.dev data for the picker's per-1M prices (shared cache in
+    // usage.js); null until it arrives or if it cannot be fetched.
+    property var modelsDevData: null
+    readonly property var modelPrices: Usage.priceLabels(modelsDevData, {
+        apiType: cfg_apiType,
+        endpoint: cfg_apiEndpoint,
+        geminiAuthMethod: cfg_geminiAuthMethod
+    }, availableModels.concat(cfg_modelName ? [cfg_modelName] : []))
     property bool fetchInProgress: false
     property string walletApiKey: ""
     property bool walletKeyLoaded: false
@@ -435,6 +444,7 @@ BaseConfigPage {
     Component.onCompleted: {
         profilesList = Profiles.ensureDefault(configPage, i18n("Default"));
         loadModelCache();
+        Usage.loadModelsDev(function(data) { configPage.modelsDevData = data; });
         // Initial reconcile: load key then models then capture.
         _configGen++;
         reconcileConfig({}, _configGen);
@@ -1182,6 +1192,7 @@ BaseConfigPage {
             Layout.fillWidth: true
             modelName: cfg_modelName
             availableModels: configPage.availableModels
+            modelPrices: configPage.modelPrices
             fetchInProgress: configPage.fetchInProgress
             fetchVisible: caps.fetchModels === true
             fetchEnabled: !configPage.fetchInProgress && (cfg_apiEndpoint || "").length > 0

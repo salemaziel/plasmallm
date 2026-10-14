@@ -5,6 +5,7 @@
 
 .import "../toolManager.js" as ToolManager
 .import "../toolCallNormalizer.js" as ToolCallNormalizer
+.import "../usage.js" as Usage
 
 // Native Anthropic Messages API adapter (POST /v1/messages, GET /v1/models).
 // Translates the host's OpenAI-shaped neutral form to/from Anthropic wire
@@ -265,6 +266,18 @@ function parseSSEChunks(buffer, lastIndex) {
         try {
             var obj = JSON.parse(payload);
             switch (obj.type) {
+            case "message_start":
+                // Input and cache counts; output_tokens here is a placeholder
+                // that message_delta overwrites.
+                if (obj.message && obj.message.usage) {
+                    tokens.push({ usage: obj.message.usage });
+                }
+                break;
+            case "message_delta":
+                if (obj.usage) {
+                    tokens.push({ usage: obj.usage });
+                }
+                break;
             case "content_block_start":
                 if (obj.content_block && obj.content_block.type === "tool_use") {
                     tokens.push({
@@ -349,6 +362,8 @@ function sendStreaming(opts) {
     var streamDone = false;
     var completeCalled = false;
     var streamError = null;
+    // message_start's usage with each message_delta's merged over it.
+    var rawUsage = null;
 
     function processBuffer() {
         if (streamDone) return;
@@ -356,6 +371,13 @@ function sendStreaming(opts) {
         lastParseIndex = result.newIndex;
         for (var i = 0; i < result.tokens.length; i++) {
             var tok = result.tokens[i];
+            if (tok.usage) {
+                rawUsage = rawUsage || {};
+                for (var uk in tok.usage) {
+                    if (tok.usage.hasOwnProperty(uk) && tok.usage[uk] !== null) rawUsage[uk] = tok.usage[uk];
+                }
+                continue;
+            }
             if (tok.done) { streamDone = true; return; }
             if (tok.error) { streamError = tok.error; streamDone = true; return; }
             if (tok.content) {
@@ -422,6 +444,15 @@ function sendStreaming(opts) {
         if (pollTimer && pollTimer.running) pollTimer.stop();
 
         var thinkingBlocks = collectThinkingBlocks();
+
+        if (opts.onUsage) {
+            // A non-streaming reply is a single message with top-level usage.
+            if (!rawUsage && !error) {
+                try { rawUsage = JSON.parse(xhr.responseText).usage || null; } catch (e) {}
+            }
+            var usage = Usage.fromAnthropic(rawUsage);
+            if (usage) opts.onUsage(usage);
+        }
 
         if (error) {
             onComplete(accumulatedText, error, null, null);

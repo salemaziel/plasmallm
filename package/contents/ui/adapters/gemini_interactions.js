@@ -5,6 +5,7 @@
 
 .import "../toolManager.js" as ToolManager
 .import "../toolCallNormalizer.js" as ToolCallNormalizer
+.import "../usage.js" as Usage
 
 // Google Gemini Interactions API adapter (POST /v1beta/interactions?alt=sse).
 // Stateful implementation using server-side interaction storage.
@@ -40,35 +41,21 @@ var STATIC_VERTEX_GEMINI_MODELS = [
     "gemini-3.1-pro-preview"
 ];
 
+// models.dev comes from the shared once-per-session cache in usage.js, which
+// also prices token usage.
 function fetchModelsDev(providerId, filterFn, fallbackList, callback) {
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", "https://models.dev/api.json");
-    xhr.timeout = 10000;
-    xhr.ontimeout = function() {
-        callback(null, fallbackList, 200);
-    };
-    xhr.onreadystatechange = function() {
-        if (xhr.readyState === XMLHttpRequest.DONE) {
-            if (xhr.status === 200) {
-                try {
-                    var data = JSON.parse(xhr.responseText);
-                    var entry = data[providerId];
-                    if (entry && entry.models) {
-                        var ids = Object.keys(entry.models);
-                        if (filterFn) ids = ids.filter(filterFn);
-                        if (ids.length > 0) {
-                            callback(null, ids, 200);
-                            return;
-                        }
-                    }
-                } catch (e) {
-                    // ignore parse error
-                }
+    Usage.loadModelsDev(function(data) {
+        var entry = data && data[providerId];
+        if (entry && entry.models) {
+            var ids = Object.keys(entry.models);
+            if (filterFn) ids = ids.filter(filterFn);
+            if (ids.length > 0) {
+                callback(null, ids, 200);
+                return;
             }
-            callback(null, fallbackList, 200);
         }
-    };
-    xhr.send();
+        callback(null, fallbackList, 200);
+    });
 }
 
 function setHeaders(xhr, apiKey, opts) {
@@ -414,6 +401,10 @@ function parseSSEChunks(buffer, lastIndex) {
                 }
             } else if (evType === "step.delta") {
                 var delta = ev.delta;
+                // Running totals may ride on a delta; the last one wins.
+                if (delta && delta.metadata && delta.metadata.total_usage) {
+                    tokens.push({ usage: delta.metadata.total_usage });
+                }
                 if (delta.type === "text") {
                     tokens.push({ content: delta.text });
                 } else if (delta.type === "thought") {
@@ -426,6 +417,9 @@ function parseSSEChunks(buffer, lastIndex) {
             } else if (evType === "step.stop") {
                 tokens.push({ thinking_close: true });
             } else if (evType === "interaction.completed" || evType === "interaction.complete") {
+                if (ev.interaction && ev.interaction.usage) {
+                    tokens.push({ usage: ev.interaction.usage });
+                }
                 tokens.push({ complete_id: ev.interaction.id });
             }
         } catch (e) {
@@ -500,12 +494,14 @@ function sendStreaming(opts) {
     var currentToolCall = null;
     var thinkingBlocks = [];
     var currentThinkingBlock = null;
+    var rawUsage = null;
 
     function processBuffer() {
         var result = parseSSEChunks(xhr.responseText, lastParseIndex);
         lastParseIndex = result.newIndex;
         for (var i = 0; i < result.tokens.length; i++) {
             var tok = result.tokens[i];
+            if (tok.usage) rawUsage = tok.usage;
             if (tok.content) {
                 accumulatedText += tok.content;
                 opts.onChunk(tok.content, accumulatedText);
@@ -558,6 +554,10 @@ function sendStreaming(opts) {
         if (xhr.readyState === 3 || xhr.readyState === 4) {
             processBuffer();
             if (xhr.readyState === 4) {
+                if (opts.onUsage && xhr.status === 200) {
+                    var usage = Usage.fromInteractions(rawUsage);
+                    if (usage) opts.onUsage(usage);
+                }
                 if (xhr.status === 200) {
                     var assistantMsg = { role: "assistant", content: accumulatedText || null, thinkingBlocks: thinkingBlocks };
                     if (accumulatedToolCalls.length > 0) {

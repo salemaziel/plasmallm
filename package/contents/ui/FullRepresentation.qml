@@ -17,6 +17,7 @@ import org.kde.draganddrop as DragDrop
 
 import "profiles.js" as Profiles
 import "driverManager.js" as DriverManager
+import "usage.js" as Usage
 
 PlasmaExtras.Representation {
     id: fullRep
@@ -372,7 +373,11 @@ PlasmaExtras.Representation {
                     onObjectAdded: function(index, object) { profileMenu.insertItem(index, object); }
                     onObjectRemoved: function(index, object) { profileMenu.removeItem(object); }
                     delegate: QQC2.MenuItem {
+                        readonly property string price: root.profilePriceText(modelData)
+                        // Room for the check box drawn on the right edge.
+                        rightPadding: Kirigami.Units.gridUnit * 2
                         text: modelData.name + (modelData.modelName ? " (" + modelData.modelName + ")" : "")
+                              + (price ? "  ·  " + price : "")
                         onTriggered: {
                             root.switchProfile(modelData.id);
                         }
@@ -391,6 +396,49 @@ PlasmaExtras.Representation {
             Item {
                 Layout.fillWidth: true
                 visible: !Plasmoid.configuration.showIconProfile
+            }
+
+            // Running token and cost total for this chat (main.qml sums the
+            // per-request usage stored on chatMessages).
+            PlasmaComponents.Label {
+                id: chatUsageLabel
+                readonly property var total: root.chatUsageTotal
+                visible: !!total
+                text: {
+                    if (!total) return "";
+                    var t = i18n("%1 tokens", Usage.formatTokens(total.inputTokens + total.outputTokens));
+                    var cost = Usage.formatCost(total);
+                    return cost ? t + " · " + cost + (total.costIncomplete ? "+" : "") : t;
+                }
+                font: Kirigami.Theme.smallFont
+                opacity: 0.7
+                Accessible.name: i18n("Chat usage")
+
+                PlasmaComponents.ToolTip.text: {
+                    var u = chatUsageLabel.total;
+                    if (!u) return "";
+                    var lines = [
+                        i18np("This chat: 1 request", "This chat: %1 requests", u.requests || 1),
+                        i18n("Input tokens: %1", u.inputTokens),
+                        i18n("Output tokens: %1", u.outputTokens)
+                    ];
+                    if (u.reasoningTokens > 0) lines.push(i18n("Reasoning tokens (part of output): %1", u.reasoningTokens));
+                    if (u.cachedInputTokens > 0) lines.push(i18n("Cached input tokens: %1", u.cachedInputTokens));
+                    if (u.costSource === "reported")
+                        lines.push(i18n("Cost reported by the provider"));
+                    else if (u.costSource === "estimated")
+                        lines.push(i18n("Cost includes estimates from models.dev list prices"));
+                    else
+                        lines.push(i18n("No price known for this model"));
+                    if (u.costIncomplete) lines.push(i18n("Some requests had no price; the cost is a lower bound"));
+                    return lines.join("\n");
+                }
+                PlasmaComponents.ToolTip.delay: Kirigami.Units.toolTipDelay
+                PlasmaComponents.ToolTip.visible: chatUsageHover.hovered && PlasmaComponents.ToolTip.text !== ""
+
+                HoverHandler {
+                    id: chatUsageHover
+                }
             }
 
             PlasmaComponents.ToolButton {
@@ -1101,6 +1149,7 @@ PlasmaExtras.Representation {
                     validationModel: model.validationModel !== undefined ? model.validationModel : ""
                     validationConfidence: model.validationConfidence !== undefined ? model.validationConfidence : ""
                     decisionJson: model.decisionJson !== undefined ? model.decisionJson : ""
+                    usageJson: model.usageJson !== undefined ? model.usageJson : ""
                     toolView: model.toolView !== undefined ? model.toolView : ""
                     toolIcon: model.toolIcon !== undefined ? model.toolIcon : ""
                     toolTitle: model.toolTitle !== undefined ? model.toolTitle : ""

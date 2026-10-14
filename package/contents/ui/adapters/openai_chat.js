@@ -6,6 +6,7 @@
 .import "../toolManager.js" as ToolManager
 .import "../toolCallNormalizer.js" as ToolCallNormalizer
 .import "../utils.js" as Utils
+.import "../usage.js" as Usage
 
 // Chat Completions strategy for the OpenAI-compatible adapter.
 // Dispatched by openai.js when the active provider does not use the
@@ -188,6 +189,14 @@ function parseSSEChunks(buffer, lastIndex) {
             if (obj.citations && Array.isArray(obj.citations) && obj.citations.length > 0) {
                 tokens.push({ citations: obj.citations });
             }
+            // Usage rides on the final chunk (choices: []) when the request
+            // set stream_options.include_usage; some servers send it unasked
+            // or repeat running totals per chunk, so the last one wins.
+            // Groq nests it under x_groq.
+            var usage = obj.usage || (obj.x_groq && obj.x_groq.usage);
+            if (usage && typeof usage === "object") {
+                tokens.push({ usage: usage });
+            }
             if (obj.choices && obj.choices[0]) {
                 var choice = obj.choices[0];
                 if (choice.delta) {
@@ -262,6 +271,7 @@ function sendStreaming(opts) {
     var accumulatedCitations = [];
     var streamDone = false;
     var completeCalled = false;
+    var rawUsage = null;
 
     function pushCitations(list) {
         if (!list || !Array.isArray(list)) return;
@@ -331,6 +341,7 @@ function sendStreaming(opts) {
                 streamDone = true;
                 continue;
             }
+            if (tok.usage) rawUsage = tok.usage;
             // Always accept citations (Exa may emit them after content / near end).
             if (tok.citations) {
                 pushCitations(tok.citations);
@@ -411,6 +422,15 @@ function sendStreaming(opts) {
         if (completeCalled) return;
         completeCalled = true;
         if (pollTimer && pollTimer.running) pollTimer.stop();
+
+        if (opts.onUsage) {
+            // A non-streaming reply carries usage at the top level.
+            if (!rawUsage && !error) {
+                try { rawUsage = JSON.parse(xhr.responseText).usage || null; } catch (e) {}
+            }
+            var usage = Usage.fromOpenAIChat(rawUsage);
+            if (usage) opts.onUsage(usage);
+        }
 
         if (error) {
             console.error("PlasmaLLM OpenAI Chat Adapter: onComplete with error:", error);
@@ -565,6 +585,11 @@ function sendStreaming(opts) {
     }
     if (tools && tools.length > 0) {
         body.tools = tools;
+    }
+    // Only set by callers that checked Usage.acceptsStreamOptions(): a strict
+    // server rejects the unknown field and fails the whole request.
+    if (opts.streamUsage) {
+        body.stream_options = { include_usage: true };
     }
 
     var payload = JSON.stringify(body, null, 2);

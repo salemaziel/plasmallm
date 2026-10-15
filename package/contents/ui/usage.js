@@ -220,11 +220,7 @@ function _stripUrl(u) {
 }
 
 function _isLocalHost(host) {
-    return host === "localhost" || host === "0.0.0.0" || host.charAt(0) === "["
-        || /\.(local|lan|internal)$/.test(host)
-        || /^(127|10)\.\d+\.\d+\.\d+$/.test(host)
-        || /^192\.168\.\d+\.\d+$/.test(host)
-        || /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
+    return Utils.isLocalHost(host);
 }
 
 // models.dev provider ids that price requests for this connection, best
@@ -402,6 +398,28 @@ function priceLabels(data, ctx, models) {
         };
     }
     return out;
+}
+
+// OpenRouter list price for a speech model, as {label, free}, or null.
+// `pricing` is the model's /models `pricing` object (USD strings); `kind` is
+// "stt" or "tts". OpenRouter doesn't label the units; checked against known
+// list prices: STT `prompt` is per second of audio (whisper-1 0.0001/s =
+// $0.006/min), TTS `prompt` is per input character (kokoro 0.00000062 =
+// $0.62 per 1M chars). A non-zero `completion` means the model is billed
+// by token, like chat.
+function speechPriceLabel(pricing, kind) {
+    if (!pricing || typeof pricing !== "object") return null;
+    var p = parseFloat(pricing.prompt);
+    var c = parseFloat(pricing.completion);
+    if (!isFinite(p)) return null;
+    if (!isFinite(c)) c = 0;
+    if (p === 0 && c === 0) return { label: "", free: true };
+    if (c > 0) {
+        return { label: formatRate(p * 1e6) + " in · " + formatRate(c * 1e6) + " out /1M tokens", free: false };
+    }
+    if (kind === "stt")
+        return { label: formatRate(p * 60) + "/min", free: false };
+    return { label: formatRate(p * 1e6) + "/1M chars", free: false };
 }
 
 // --- models.dev fetch, once per session ------------------------------------

@@ -6,6 +6,8 @@
 import QtQuick
 import QtQuick.Layouts
 import QtQuick.Controls as QQC2
+import QtQuick.Dialogs
+import QtCore
 import org.kde.kirigami as Kirigami
 import org.kde.kcmutils
 import org.kde.kquickcontrols
@@ -18,6 +20,7 @@ import "walletCore.js" as WalletCore
 import "stt.js" as Stt
 import "utils.js" as Utils
 import "profiles.js" as Profiles
+import "usage.js" as Usage
 
 BaseConfigPage {
     id: configPage
@@ -33,15 +36,22 @@ BaseConfigPage {
     property string lastKeySlot: ""
     property int _sttKeyGen: 0
     property bool cliTestInProgress: false
+    property string cliTestStatus: ""
     property bool cliCacheCheckInProgress: false
     property string cliCacheStatus: ""
     property int _cacheGen: 0
     property string cliCudaStatus: ""
     property int _cudaGen: 0
+    property bool cppScanInProgress: false
+    property int _cppScanGen: 0
 
     readonly property var sttPresets: Stt.providerPresets()
     readonly property var sttBackends: Stt.backendChoices()
+    // isCliBackend is the Python openai-whisper CLI only; whisper.cpp has its
+    // own flag and isLocalBackend covers both for the shared CLI fields.
     readonly property bool isCliBackend: (cfg_sttBackend || "") === "whisper_cli"
+    readonly property bool isCppBackend: (cfg_sttBackend || "") === "whisper_cpp"
+    readonly property bool isLocalBackend: isCliBackend || isCppBackend
     // OpenRouter attribution applies to STT only through the HTTP
     // transcriptions adapter; whisper_cli is local and never attributes.
     readonly property bool sttOpenRouterSelected: (cfg_sttBackend || "openai_transcriptions") === "openai_transcriptions" &&
@@ -98,6 +108,41 @@ BaseConfigPage {
     }
 
     P5Support.DataSource {
+        id: whisperCppScan
+        engine: "executable"
+        connectedSources: []
+        property int pendingGen: 0
+        onNewData: function(source, data) {
+            var exitCode = data["exit code"];
+            if (exitCode === undefined)
+                return;
+            disconnectSource(source);
+            if (pendingGen !== configPage._cppScanGen)
+                return;
+            cppScanInProgress = false;
+            availableModels = Stt.whisperCppParseScan(data.stdout || "");
+            // A model id carried over from another backend (e.g. "base") is
+            // not a file path; pick a found model instead.
+            var cur = (cfg_sttModelName || "").replace(/^\s+|\s+$/g, "");
+            if (cur.length === 0 || (cur.charAt(0) !== "/" && cur.indexOf("~/") !== 0)) {
+                var pick = "";
+                for (var i = 0; i < availableModels.length; i++) {
+                    if (/\/ggml-base\.bin$/.test(availableModels[i])) {
+                        pick = availableModels[i];
+                        break;
+                    }
+                }
+                if (!pick.length && availableModels.length > 0)
+                    pick = availableModels[0];
+                cfg_sttModelName = pick;
+            }
+            syncModelCombo();
+            statusLabel.text = i18n("Found %1 whisper.cpp model(s).", availableModels.length);
+            statusLabel.visible = true;
+        }
+    }
+
+    P5Support.DataSource {
         id: whisperTest
         engine: "executable"
         connectedSources: []
@@ -120,6 +165,7 @@ BaseConfigPage {
                 else
                     statusLabel.text = i18n("Whisper CLI test failed (exit %1). Check the command.", exitCode);
             }
+            cliTestStatus = statusLabel.text;
             statusLabel.visible = true;
         }
     }
@@ -244,6 +290,19 @@ BaseConfigPage {
             backendCombo.currentIndex = idx;
     }
 
+    function scanCppModels() {
+        var cmd = Stt.whisperCppScanCommand(cfg_sttCppModelDirs);
+        if (!cmd || cmd.length === 0) {
+            availableModels = [];
+            syncModelCombo();
+            return;
+        }
+        var myGen = ++_cppScanGen;
+        cppScanInProgress = true;
+        whisperCppScan.pendingGen = myGen;
+        whisperCppScan.connectSource(cmd);
+    }
+
     function applyCliModelList() {
         Stt.fetchModels("", "", "whisper_cli", function(err, models) {
             availableModels = models || [];
@@ -304,6 +363,12 @@ BaseConfigPage {
             if (!cfg_sttCliBinary || cfg_sttCliBinary.length === 0)
                 cfg_sttCliBinary = "whisper";
             applyCliModelList();
+        } else if (choice.id === "whisper_cpp") {
+            if (!cfg_sttCppBinary || cfg_sttCppBinary.length === 0)
+                cfg_sttCppBinary = "whisper-cli";
+            cliCacheStatus = "";
+            cliCudaStatus = "";
+            scanCppModels();
         } else {
             loadModelCache();
             cliCacheStatus = "";
@@ -313,16 +378,27 @@ BaseConfigPage {
     function testWhisperCli() {
         if (cliTestInProgress)
             return;
-        var prefix = (cfg_sttCliBinary || "whisper").replace(/^\s+|\s+$/g, "") || "whisper";
+        var cmd;
+        if (isCppBackend) {
+            cmd = Stt.whisperCppHelpCommand(cfg_sttCppBinary);
+        } else {
+            var prefix = (cfg_sttCliBinary || "whisper").replace(/^\s+|\s+$/g, "") || "whisper";
+            cmd = prefix + " --help";
+        }
         cliTestInProgress = true;
-        statusLabel.text = i18n("Testing Whisper CLI…");
+        statusLabel.text = isCppBackend ? i18n("Testing whisper.cpp…") : i18n("Testing Whisper CLI…");
+        cliTestStatus = statusLabel.text;
         statusLabel.visible = true;
-        whisperTest.connectSource(prefix + " --help");
+        whisperTest.connectSource(cmd);
     }
 
     function fetchModels() {
         if (fetchInProgress)
             return;
+        if (isCppBackend) {
+            scanCppModels();
+            return;
+        }
         if (isCliBackend) {
             applyCliModelList();
             statusLabel.text = i18n("Loaded %1 STT model(s).", availableModels.length);
@@ -339,7 +415,7 @@ BaseConfigPage {
         statusLabel.text = i18n("Fetching STT models…");
         statusLabel.visible = true;
         var key = walletApiKey || (apiKeyField ? apiKeyField.text : "") || "";
-        Stt.fetchModels(endpoint, key, cfg_sttBackend || "openai_transcriptions", function(err, models) {
+        Stt.fetchModels(endpoint, key, cfg_sttBackend || "openai_transcriptions", function(err, models, status, prices) {
             fetchInProgress = false;
             if (err) {
                 statusLabel.text = err;
@@ -348,6 +424,7 @@ BaseConfigPage {
             }
             availableModels = models || [];
             cfg_sttAvailableModels = JSON.stringify(availableModels);
+            cfg_sttModelPrices = JSON.stringify({ endpoint: priceEndpoint(), prices: prices || {} });
             if (cfg_sttModelName && availableModels.indexOf(cfg_sttModelName) === -1) {
                 // keep selection; combo will prepend it
             } else if ((!cfg_sttModelName || cfg_sttModelName.length === 0) && availableModels.length > 0) {
@@ -357,6 +434,29 @@ BaseConfigPage {
             statusLabel.text = i18n("Loaded %1 STT model(s).", availableModels.length);
             statusLabel.visible = true;
         });
+    }
+
+    function priceEndpoint() {
+        return (cfg_sttApiEndpoint || "").replace(/^\s+|\s+$/g, "").replace(/\/+$/, "");
+    }
+
+    // { modelId: {label, free} } for ModelPicker. Only the HTTP backend has
+    // prices, and only for the endpoint they were fetched from.
+    readonly property var modelPrices: {
+        var out = {};
+        if (isLocalBackend || !cfg_sttModelPrices)
+            return out;
+        var cache = {};
+        try {
+            cache = JSON.parse(cfg_sttModelPrices) || {};
+        } catch (e) {}
+        if (cache.endpoint !== priceEndpoint() || !cache.prices)
+            return out;
+        for (var id in cache.prices) {
+            var l = Usage.speechPriceLabel(cache.prices[id], "stt");
+            if (l) out[id] = l;
+        }
+        return out;
     }
 
     function applyProvider(index) {
@@ -399,6 +499,8 @@ BaseConfigPage {
             cfg_sttBackend = "openai_transcriptions";
         if (isCliBackend) {
             applyCliModelList();
+        } else if (isCppBackend) {
+            scanCppModels();
         } else {
             loadModelCache();
             cliCacheStatus = "";
@@ -418,6 +520,10 @@ BaseConfigPage {
         syncBackendCombo();
         if (isCliBackend) {
             applyCliModelList();
+        } else if (isCppBackend) {
+            cliCacheStatus = "";
+            cliCudaStatus = "";
+            scanCppModels();
         } else {
             loadModelCache();
             cliCacheStatus = "";
@@ -542,7 +648,7 @@ BaseConfigPage {
 
         QQC2.ComboBox {
             id: providerCombo
-            visible: !isCliBackend
+            visible: !isLocalBackend
             Kirigami.FormData.label: i18n("Provider:")
             Layout.fillWidth: true
             Layout.preferredWidth: 0
@@ -555,7 +661,7 @@ BaseConfigPage {
 
         QQC2.TextField {
             id: endpointField
-            visible: !isCliBackend
+            visible: !isLocalBackend
             Kirigami.FormData.label: i18n("Endpoint:")
             Layout.fillWidth: true
             Layout.preferredWidth: 0
@@ -590,13 +696,18 @@ BaseConfigPage {
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
             modelName: cfg_sttModelName
+            modelPrices: configPage.modelPrices
             availableModels: configPage.availableModels
             fetchInProgress: configPage.fetchInProgress
             fetchVisible: !isCliBackend
-            fetchEnabled: !isCliBackend && !configPage.fetchInProgress && (cfg_sttApiEndpoint || "").length > 0
-            fetchTooltip: i18n("Fetch STT models")
+            fetchEnabled: isCppBackend ? !cppScanInProgress
+                : (!isCliBackend && !configPage.fetchInProgress && (cfg_sttApiEndpoint || "").length > 0)
+            fetchTooltip: isCppBackend ? i18n("Rescan model folders") : i18n("Fetch STT models")
             onModelSelected: function(selected) {
                 cfg_sttModelName = selected;
+                // Picking drops the binding; restore it so the combo always
+                // shows the saved model.
+                modelPicker.modelName = Qt.binding(function() { return cfg_sttModelName; });
                 rootItem.triggerCapture();
             }
             onFetchRequested: fetchModels()
@@ -613,7 +724,7 @@ BaseConfigPage {
         }
 
         QQC2.Label {
-            visible: !isCliBackend
+            visible: !isLocalBackend
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
             wrapMode: Text.WordWrap
@@ -623,7 +734,7 @@ BaseConfigPage {
         }
 
         RowLayout {
-            visible: !isCliBackend
+            visible: !isLocalBackend
             Kirigami.FormData.label: i18n("API key:")
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
@@ -679,7 +790,82 @@ BaseConfigPage {
         }
 
         RowLayout {
-            visible: isCliBackend
+            visible: isCppBackend
+            Kirigami.FormData.label: i18n("Binary:")
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.TextField {
+                id: cppBinaryField
+                Layout.fillWidth: true
+                Layout.preferredWidth: 0
+                placeholderText: "whisper-cli"
+                text: cfg_sttCppBinary
+                onTextChanged: {
+                    if (!_initialized) return;
+                    cfg_sttCppBinary = text;
+                }
+            }
+
+            QQC2.Button {
+                text: i18n("Browse…")
+                icon.name: "document-open"
+                onClicked: cppBinaryDialog.open()
+            }
+        }
+
+        FileDialog {
+            id: cppBinaryDialog
+            title: i18n("Select whisper-cli binary")
+            fileMode: FileDialog.OpenFile
+            currentFolder: StandardPaths.writableLocation(StandardPaths.HomeLocation)
+            onAccepted: {
+                cfg_sttCppBinary = decodeURIComponent(selectedFile.toString().replace(/^file:\/\//, ""));
+            }
+        }
+
+        QQC2.Label {
+            visible: isCppBackend
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("whisper.cpp whisper-cli: a name on PATH or a full path (a leading ~/ is expanded). The model is the full path to a ggml .bin file.")
+        }
+
+        QQC2.TextField {
+            id: cppDirsField
+            visible: isCppBackend
+            Kirigami.FormData.label: i18n("Model folders:")
+            Layout.fillWidth: true
+            Layout.preferredWidth: 0
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 22
+            placeholderText: "~/.cache/whisper.cpp"
+            text: cfg_sttCppModelDirs
+            onTextChanged: {
+                if (!_initialized) return;
+                cfg_sttCppModelDirs = text;
+            }
+            onEditingFinished: {
+                if (!_initialized) return;
+                scanCppModels();
+            }
+        }
+
+        QQC2.Label {
+            visible: isCppBackend
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: i18n("Colon-separated folders searched for ggml-*.bin files. Use the refresh button next to Model to rescan.")
+        }
+
+        RowLayout {
+            visible: isLocalBackend
             Kirigami.FormData.label: i18n("Test:")
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
@@ -691,11 +877,21 @@ BaseConfigPage {
                 enabled: !cliTestInProgress
                 onClicked: testWhisperCli()
             }
+
+            // The page-wide status line sits below the fold; show the
+            // result where the button is.
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                font: Kirigami.Theme.smallFont
+                text: cliTestStatus
+                visible: cliTestStatus.length > 0
+            }
         }
 
         QQC2.ComboBox {
             id: cliTaskCombo
-            visible: isCliBackend
+            visible: isLocalBackend
             Kirigami.FormData.label: i18n("Task:")
             Layout.fillWidth: true
             Layout.preferredWidth: 0
@@ -715,12 +911,12 @@ BaseConfigPage {
 
         QQC2.ComboBox {
             id: cliDeviceCombo
-            visible: isCliBackend
+            visible: isLocalBackend
             Kirigami.FormData.label: i18n("Device:")
             Layout.fillWidth: true
             Layout.preferredWidth: 0
             Layout.maximumWidth: Kirigami.Units.gridUnit * 22
-            model: [i18n("Default"), "cpu", "cuda"]
+            model: isCppBackend ? [i18n("Default"), "cpu"] : [i18n("Default"), "cpu", "cuda"]
             readonly property var deviceIds: ["", "cpu", "cuda"]
             currentIndex: {
                 var d = cfg_sttCliDevice || "";
@@ -784,7 +980,7 @@ BaseConfigPage {
 
         QQC2.SpinBox {
             id: cliThreadsSpin
-            visible: isCliBackend
+            visible: isLocalBackend
             Kirigami.FormData.label: i18n("Threads:")
             from: 0
             to: 64
@@ -796,18 +992,20 @@ BaseConfigPage {
         }
 
         QQC2.Label {
-            visible: isCliBackend
+            visible: isLocalBackend
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             opacity: 0.7
-            text: i18n("0 omits --threads (Whisper default). FP16 off is safer on CPU.")
+            text: isCppBackend
+                ? i18n("0 omits -t (whisper.cpp default). Device cpu passes -ng to turn the GPU off.")
+                : i18n("0 omits --threads (Whisper default). FP16 off is safer on CPU.")
         }
 
         QQC2.TextField {
             id: cliPromptField
-            visible: isCliBackend
+            visible: isLocalBackend
             Kirigami.FormData.label: i18n("Initial prompt:")
             Layout.fillWidth: true
             Layout.preferredWidth: 0
@@ -822,7 +1020,7 @@ BaseConfigPage {
 
         QQC2.TextField {
             id: cliExtraField
-            visible: isCliBackend
+            visible: isLocalBackend
             Kirigami.FormData.label: i18n("Extra args:")
             Layout.fillWidth: true
             Layout.preferredWidth: 0

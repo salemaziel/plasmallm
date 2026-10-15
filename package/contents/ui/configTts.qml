@@ -17,6 +17,7 @@ import "wallet.js" as Wallet
 import "walletCore.js" as WalletCore
 import "tts.js" as Tts
 import "profiles.js" as Profiles
+import "usage.js" as Usage
 
 BaseConfigPage {
     id: configPage
@@ -40,6 +41,12 @@ BaseConfigPage {
     readonly property bool isEndpointBackend: (cfg_ttsBackend || "") === "openai_speech"
     readonly property bool isCustomBackend: (cfg_ttsBackend || "") === "custom_cli"
 
+    // Runs the commands Tts.speak hands it and returns each result to the
+    // callback it came with. Endpoint backends run in two steps (synthesize,
+    // then play); the second only starts when the first one's result comes
+    // back, so the callback must be invoked or nothing is ever heard.
+    property var _testCallbacks: ({})
+
     P5Support.DataSource {
         id: ttsTestRunner
         engine: "executable"
@@ -49,22 +56,19 @@ BaseConfigPage {
             if (exitCode === undefined)
                 return;
             disconnectSource(source);
-            testInProgress = false;
-            var stderr = (data.stderr || "").replace(/^\s+|\s+$/g, "");
-            var stdout = (data.stdout || "").replace(/^\s+|\s+$/g, "");
-            if (exitCode === 0) {
-                statusLabel.text = i18n("Text-to-speech test completed successfully.");
-            } else {
-                var detail = stderr || stdout || "";
-                if (detail.length > 240)
-                    detail = detail.substring(0, 240);
-                if (detail.length)
-                    statusLabel.text = i18n("TTS test failed (exit %1): %2", exitCode, detail);
-                else
-                    statusLabel.text = i18n("TTS test failed (exit %1).", exitCode);
-            }
-            statusLabel.visible = true;
+            var cb = configPage._testCallbacks[source];
+            delete configPage._testCallbacks[source];
+            if (typeof cb === "function")
+                cb(null, { stdout: data.stdout || "", stderr: data.stderr || "", exitCode: exitCode });
         }
+    }
+
+    function finishVoiceTest(err) {
+        testInProgress = false;
+        statusLabel.text = err
+            ? i18n("TTS test failed: %1", String(err).substring(0, 240))
+            : i18n("Text-to-speech test completed successfully.");
+        statusLabel.visible = true;
     }
 
     function currentTtsSlot() {
@@ -232,7 +236,7 @@ BaseConfigPage {
 
     function loadModelCache() {
         availableModels = [];
-        if (cfg_ttsAvailableModels && cfg_ttsAvailableModels.length > 0) {
+        if (voiceCacheMatchesEndpoint() && cfg_ttsAvailableModels && cfg_ttsAvailableModels.length > 0) {
             try {
                 var arr = JSON.parse(cfg_ttsAvailableModels);
                 if (Array.isArray(arr))
@@ -243,6 +247,51 @@ BaseConfigPage {
             availableModels = Tts.defaultKnownModels();
         }
         syncModelCombo();
+    }
+
+    // Endpoint as stored with the fetched model/voice/price cache.
+    function cacheEndpoint() {
+        return (cfg_ttsApiEndpoint || "").replace(/^\s+|\s+$/g, "").replace(/\/+$/, "");
+    }
+
+    function readVoiceCache() {
+        try {
+            return JSON.parse(cfg_ttsAvailableVoices || "{}") || {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    // The model, voice and price caches all come from one fetch; they only
+    // apply while the endpoint is the one they were fetched from.
+    function voiceCacheMatchesEndpoint() {
+        return readVoiceCache()._endpoint === cacheEndpoint();
+    }
+
+    // { modelId: {label, free} } for ModelPicker, from OpenRouter pricing.
+    readonly property var modelPrices: {
+        var out = {};
+        var cache = cfg_ttsAvailableVoices ? readVoiceCache() : {};
+        if (cache._endpoint !== cacheEndpoint() || !cache._prices)
+            return out;
+        for (var id in cache._prices) {
+            var l = Usage.speechPriceLabel(cache._prices[id], "tts");
+            if (l) out[id] = l;
+        }
+        return out;
+    }
+
+    // After a fetch, a model the endpoint doesn't list is replaced: prefer a
+    // listed id that names the same model ("kokoro" for "hexgrad/kokoro-82m"),
+    // else the first one.
+    function pickListedModel(current, list) {
+        var cur = (current || "").toLowerCase();
+        for (var i = 0; i < list.length; i++) {
+            var m = String(list[i]).toLowerCase();
+            if (cur.length && (cur.indexOf(m) >= 0 || m.indexOf(cur) >= 0))
+                return list[i];
+        }
+        return list.length > 0 ? list[0] : "";
     }
 
     function fetchModels() {
@@ -258,7 +307,7 @@ BaseConfigPage {
         statusLabel.text = i18n("Fetching TTS models…");
         statusLabel.visible = true;
         var key = walletApiKey || (apiKeyField ? apiKeyField.text : "") || "";
-        Tts.fetchModels(endpoint, key, cfg_ttsBackend || "openai_speech", function(err, models) {
+        Tts.fetchModels(endpoint, key, cfg_ttsBackend || "openai_speech", function(err, models, voices, prices) {
             fetchInProgress = false;
             if (err) {
                 statusLabel.text = err;
@@ -267,13 +316,21 @@ BaseConfigPage {
             }
             availableModels = models || [];
             cfg_ttsAvailableModels = JSON.stringify(availableModels);
+            var voiceCache = voices || {};
+            voiceCache._endpoint = cacheEndpoint();
+            voiceCache._prices = prices || {};
+            cfg_ttsAvailableVoices = JSON.stringify(voiceCache);
+            var reported = JSON.stringify(availableModels) !== JSON.stringify(Tts.defaultKnownModels());
             if (cfg_ttsModelName && availableModels.indexOf(cfg_ttsModelName) === -1) {
-                // keep selection; combo will prepend it
+                // The endpoint's own list is authoritative; the built-in
+                // fallback list is not, so a typed model is kept then.
+                if (reported)
+                    cfg_ttsModelName = pickListedModel(cfg_ttsModelName, availableModels);
             } else if ((!cfg_ttsModelName || cfg_ttsModelName.length === 0) && availableModels.length > 0) {
                 cfg_ttsModelName = availableModels[0];
             }
             syncModelCombo();
-            syncVoiceCombo();
+            syncVoiceCombo(true);
             statusLabel.text = i18n("Loaded %1 TTS model(s).", availableModels.length);
             statusLabel.visible = true;
         });
@@ -292,8 +349,11 @@ BaseConfigPage {
         if (p.responseFormat && p.responseFormat.length > 0)
             cfg_ttsResponseFormat = p.responseFormat;
         loadWalletKey();
+        loadModelCache();
         syncModelCombo();
-        syncVoiceCombo();
+        syncVoiceCombo(true);
+        if (isEndpointBackend && cacheEndpoint().length > 0 && !voiceCacheMatchesEndpoint())
+            fetchModels();
     }
 
     function syncBackendCombo() {
@@ -319,14 +379,50 @@ BaseConfigPage {
         }
     }
 
-    function syncVoiceCombo() {
+    // Voices for the current model: the list the endpoint reported for this
+    // model, else the server-wide list ("*"), else the built-in names.
+    function voicesForModel(model) {
+        var map = {};
+        try {
+            map = JSON.parse(cfg_ttsAvailableVoices || "{}") || {};
+        } catch (e) {}
+        // The cache belongs to the endpoint it was fetched from.
+        if (map._endpoint !== cacheEndpoint())
+            map = {};
+        if (Array.isArray(map[model]) && map[model].length > 0)
+            return { list: map[model].slice(), reported: true };
+        if (Array.isArray(map["*"]) && map["*"].length > 0)
+            return { list: map["*"].slice(), reported: true };
+        var lower = (model || "").toLowerCase();
+        if (lower.indexOf("gemini") >= 0)
+            return { list: Tts.knownGeminiVoices(), reported: false };
+        if (lower.indexOf("kokoro") >= 0)
+            return { list: ["af_heart"], reported: false };
+        return { list: Tts.knownOpenAiVoices(), reported: false };
+    }
+
+    // modelChanged: the saved voice may belong to the previous model, so
+    // replace it with a valid default when the new model doesn't list it.
+    // Otherwise a voice missing from the list was typed by hand; keep it.
+    function syncVoiceCombo(modelChanged) {
         if (!voiceCombo) return;
-        var isGemini = (cfg_ttsModelName || "").indexOf("gemini") >= 0;
-        var list = isGemini ? Tts.knownGeminiVoices() : Tts.knownOpenAiVoices();
+        var res = voicesForModel(cfg_ttsModelName || "");
+        var list = res.list;
+        var cur = cfg_ttsVoice || "";
+        if (cur && list.indexOf(cur) === -1) {
+            if (modelChanged) {
+                var hasHeart = list.indexOf("af_heart") >= 0;
+                cur = hasHeart ? "af_heart" : (list[0] || "");
+            } else {
+                list.unshift(cur);
+            }
+        } else if (!cur) {
+            cur = list[0] || "";
+        }
         voiceCombo.model = list;
-        var cur = cfg_ttsVoice || (isGemini ? "Zephyr" : "alloy");
-        var idx = list.indexOf(cur);
-        voiceCombo.currentIndex = idx >= 0 ? idx : 0;
+        voiceCombo.currentIndex = list.indexOf(cur);
+        if (_initialized && cur !== cfg_ttsVoice)
+            cfg_ttsVoice = cur;
     }
 
     function runVoiceTest() {
@@ -359,14 +455,11 @@ BaseConfigPage {
             text: sample,
             apiKey: key,
             runCommand: function(cmd, cb) {
-                ttsTestRunner.connectSource(cmd);
+                configPage._testCallbacks[String(cmd)] = cb;
+                ttsTestRunner.connectSource(String(cmd));
             },
             callback: function(err, res) {
-                if (err) {
-                    testInProgress = false;
-                    statusLabel.text = err;
-                    statusLabel.visible = true;
-                }
+                finishVoiceTest(err);
             }
         });
     }
@@ -393,7 +486,7 @@ BaseConfigPage {
     onCfg_ttsModelNameChanged: {
         if (_initialized) {
             syncModelCombo();
-            syncVoiceCombo();
+            syncVoiceCombo(true);
         }
     }
     onCfg_ttsAvailableModelsChanged: if (_initialized) loadModelCache()
@@ -638,6 +731,13 @@ BaseConfigPage {
                 if (!_initialized) return;
                 cfg_ttsApiEndpoint = text;
             }
+            // A new endpoint means a new model list; fetch it once editing ends.
+            onEditingFinished: {
+                if (!_initialized) return;
+                loadModelCache();
+                if (cacheEndpoint().length > 0 && !voiceCacheMatchesEndpoint())
+                    fetchModels();
+            }
         }
 
         RowLayout {
@@ -687,6 +787,7 @@ BaseConfigPage {
             Layout.fillWidth: true
             Layout.maximumWidth: Kirigami.Units.gridUnit * 28
             modelName: cfg_ttsModelName
+            modelPrices: configPage.modelPrices
             availableModels: configPage.availableModels
             fetchInProgress: configPage.fetchInProgress
             fetchVisible: isEndpointBackend
@@ -694,7 +795,10 @@ BaseConfigPage {
             fetchTooltip: i18n("Fetch TTS models")
             onModelSelected: function(selected) {
                 cfg_ttsModelName = selected;
-                syncVoiceCombo();
+                // Picking writes modelName directly, which drops the binding;
+                // restore it so the combo always shows the model Test uses.
+                modelPicker.modelName = Qt.binding(function() { return cfg_ttsModelName; });
+                syncVoiceCombo(true);
                 rootItem.triggerCapture();
             }
             onFetchRequested: fetchModels()

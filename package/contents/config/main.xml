@@ -443,7 +443,7 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
       <default></default>
     </entry>
     <entry name="sttBackend" type="String">
-      <label>STT backend adapter id (openai_transcriptions, whisper_cli)</label>
+      <label>STT backend adapter id (openai_transcriptions, whisper_cli, whisper_cpp)</label>
       <default>openai_transcriptions</default>
     </entry>
     <entry name="sttCliBinary" type="String">
@@ -476,6 +476,14 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
       <label>Extra arguments appended to the Whisper CLI command</label>
       <default></default>
     </entry>
+    <entry name="sttCppBinary" type="String">
+      <label>whisper.cpp binary (whisper-cli name on PATH, or a full path; leading ~/ is expanded)</label>
+      <default>whisper-cli</default>
+    </entry>
+    <entry name="sttCppModelDirs" type="String">
+      <label>Colon-separated folders scanned for whisper.cpp ggml-*.bin models</label>
+      <default>~/.voicemode/models/whisper:~/.voicemode/services/whisper/models:~/.cache/openwhispr/whisper-models:~/.cache/whisper.cpp</default>
+    </entry>
     <entry name="sttLanguage" type="String">
       <label>Optional ISO-639-1 language hint for STT (empty = auto-detect)</label>
       <default></default>
@@ -502,6 +510,10 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
     </entry>
     <entry name="sttAvailableModels" type="String">
       <label>Cached STT model list JSON array</label>
+      <default></default>
+    </entry>
+    <entry name="sttModelPrices" type="String">
+      <label>Cached STT model prices JSON: {endpoint, prices: {model id: pricing}}</label>
       <default></default>
     </entry>
     <entry name="sttMigratedFromProfile" type="Bool">
@@ -586,6 +598,10 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
     </entry>
     <entry name="ttsAvailableModels" type="String">
       <label>Cached TTS model list JSON array</label>
+      <default></default>
+    </entry>
+    <entry name="ttsAvailableVoices" type="String">
+      <label>Cached TTS voices JSON object: model id to voice list, "*" for the whole server</label>
       <default></default>
     </entry>
     <entry name="useCommandTool" type="Bool">

@@ -23,6 +23,26 @@ function hostOf(endpoint) {
     return m ? m[1].toLowerCase() : "";
 }
 
+// A loopback, private-network or .local/.lan/.internal host.
+function isLocalHost(host) {
+    host = String(host || "").toLowerCase();
+    return host === "localhost" || host === "0.0.0.0" || host.charAt(0) === "["
+        || /\.(local|lan|internal)$/.test(host)
+        || /^(127|10)\.\d+\.\d+\.\d+$/.test(host)
+        || /^192\.168\.\d+\.\d+$/.test(host)
+        || /^172\.(1[6-9]|2\d|3[01])\.\d+\.\d+$/.test(host);
+}
+
+// "127.0.0.1:8880/v1" → "http://127.0.0.1:8880/v1"; a remote host gets
+// https://. An endpoint that already has a scheme is returned unchanged.
+function withScheme(endpoint) {
+    var e = String(endpoint || "").replace(/^\s+|\s+$/g, "");
+    if (!e.length || /^[a-z][a-z0-9+.-]*:\/\//i.test(e))
+        return e;
+    var host = e.replace(/[\/:?#].*$/, "");
+    return (isLocalHost(host) ? "http://" : "https://") + e;
+}
+
 // OpenRouter app host: openrouter.ai, www.openrouter.ai, or *.openrouter.ai.
 function isOpenRouterHost(host) {
     host = String(host || "").toLowerCase();

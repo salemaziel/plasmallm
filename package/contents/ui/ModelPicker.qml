@@ -21,7 +21,9 @@ RowLayout {
     property string placeholderText: i18n("Select or enter a model")
     property int maxPopupHeight: Kirigami.Units.gridUnit * 20
     // { modelId: {input, output, free} } list prices per 1M tokens, from
-    // Usage.priceLabels(); models without an entry show no price.
+    // Usage.priceLabels(); or { modelId: {label, free} } with the text
+    // ready-made (speech models, priced per minute or per character, from
+    // Usage.speechPriceLabel()). Models without an entry show no price.
     property var modelPrices: ({})
 
     signal fetchRequested()
@@ -141,15 +143,17 @@ RowLayout {
                                     visible: !!modelDelegate.price
                                     text: !modelDelegate.price ? ""
                                         : modelDelegate.price.free ? i18n("free")
+                                        : modelDelegate.price.label ? modelDelegate.price.label
                                         : i18n("%1 in · %2 out /1M", modelDelegate.price.input, modelDelegate.price.output)
                                     font: Kirigami.Theme.smallFont
                                     opacity: 0.7
                                     color: modelDelegate.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                                 }
                             }
-                            QQC2.ToolTip.text: modelDelegate.price
-                                ? i18n("List price per 1M tokens (models.dev): %1 input, %2 output", modelDelegate.price.input, modelDelegate.price.output)
-                                : ""
+                            QQC2.ToolTip.text: !modelDelegate.price ? ""
+                                : modelDelegate.price.free ? i18n("Free")
+                                : modelDelegate.price.label ? i18n("List price (from the endpoint): %1", modelDelegate.price.label)
+                                : i18n("List price per 1M tokens (models.dev): %1 input, %2 output", modelDelegate.price.input, modelDelegate.price.output)
                             QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                             QQC2.ToolTip.visible: hovered && QQC2.ToolTip.text !== ""
                             onClicked: {

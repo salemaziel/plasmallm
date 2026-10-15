@@ -20,7 +20,8 @@ function loadModule(relPath, extraScope = {}) {
 
 // Load adapters
 const SpdSay = loadModule("../package/contents/ui/ttsAdapters/spd_say.js");
-const OpenaiSpeech = loadModule("../package/contents/ui/ttsAdapters/openai_speech.js");
+const Utils = loadModule("../package/contents/ui/utils.js");
+const OpenaiSpeech = loadModule("../package/contents/ui/ttsAdapters/openai_speech.js", { Utils });
 const CustomCli = loadModule("../package/contents/ui/ttsAdapters/custom_cli.js");
 
 const TtsAdapters = {
@@ -286,7 +287,7 @@ const MockXhrSuccess = createMockXhr(200, {
 });
 
 const OpenaiSpeechWithXhr = loadModule("../package/contents/ui/ttsAdapters/openai_speech.js", {
-    XMLHttpRequest: MockXhrSuccess
+    XMLHttpRequest: MockXhrSuccess, Utils
 });
 OpenaiSpeechWithXhr.fetchModels("https://openrouter.ai/api/v1", "key", function(err, models) {
     ok(!err, "fetchModels succeeded");
@@ -299,7 +300,7 @@ OpenaiSpeechWithXhr.fetchModels("https://openrouter.ai/api/v1", "key", function(
 // Fallback on HTTP error
 const MockXhrFail = createMockXhr(500, "Internal Server Error");
 const OpenaiSpeechFail = loadModule("../package/contents/ui/ttsAdapters/openai_speech.js", {
-    XMLHttpRequest: MockXhrFail
+    XMLHttpRequest: MockXhrFail, Utils
 });
 OpenaiSpeechFail.fetchModels("https://api.openai.com/v1", "", function(err, models) {
     ok(!err, "fetchModels fallback returns default models on error");

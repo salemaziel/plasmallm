@@ -7,6 +7,8 @@
 // Supports OpenRouter (google/gemini-3.8-flash-lite-tts with raw PCM)
 // and OpenAI (tts-1, tts-1-hd with MP3), as well as custom endpoints.
 
+.import "../utils.js" as Utils
+
 var id = "openai_speech";
 var displayName = "OpenRouter / OpenAI speech endpoint";
 var transport = "endpoint";
@@ -33,6 +35,8 @@ function defaultVoiceForModel(model) {
     var m = String(model || "").toLowerCase();
     if (m.indexOf("gemini") >= 0)
         return "Zephyr";
+    if (m.indexOf("kokoro") >= 0)
+        return "af_heart";
     return "alloy";
 }
 
@@ -62,7 +66,7 @@ function buildCommand(opts) {
     if (!text.trim().length)
         throw new Error("No text to speak");
 
-    var endpoint = trimStr(opts.endpoint).replace(/\/+$/, "");
+    var endpoint = Utils.withScheme(trimStr(opts.endpoint)).replace(/\/+$/, "");
     if (!endpoint.length)
         throw new Error("TTS endpoint is not configured");
 
@@ -179,16 +183,35 @@ function defaultKnownModels() {
     return DEFAULT_TTS_MODELS.slice();
 }
 
+function isSpeechModel(entry, id) {
+    var arch = entry && typeof entry === "object" ? entry.architecture : null;
+    var out = arch && Array.isArray(arch.output_modalities) ? arch.output_modalities : [];
+    if (out.indexOf("speech") >= 0)
+        return true;
+    var lower = id.toLowerCase();
+    return lower.indexOf("tts") >= 0 || lower.indexOf("speech") >= 0
+        || lower.indexOf("audio") >= 0 || lower.indexOf("kokoro") >= 0;
+}
+
 /**
  * Fetch available TTS models from the endpoint, seeded with known TTS models.
  *
+ * Voices come from two places: OpenRouter lists `supported_voices` on each
+ * model, and Kokoro-FastAPI style servers answer GET /audio/voices with one
+ * list for the whole server. The voices map is keyed by model id, with "*"
+ * holding the server-wide list.
+ *
  * @param {string} endpoint
  * @param {string} apiKey
- * @param {function} callback function(err, models)
+ * The model list is what the endpoint reports; the built-in defaults are
+ * used only when it reports no speech models (unreachable, or no /models).
+ * `prices` maps model id to the endpoint's `pricing` object (OpenRouter).
+ *
+ * @param {function} callback function(err, models, voices, prices)
  */
 function fetchModels(endpoint, apiKey, callback) {
     callback = callback || function() {};
-    var base = trimStr(endpoint).replace(/\/+$/, "");
+    var base = Utils.withScheme(trimStr(endpoint)).replace(/\/+$/, "");
     if (!base.length) {
         callback("TTS endpoint is not configured", null);
         return;
@@ -204,45 +227,75 @@ function fetchModels(endpoint, apiKey, callback) {
         }
     }
 
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", base + "/models");
-    xhr.timeout = 25000;
-    setHeaders(xhr, apiKey);
-    xhr.ontimeout = function() {
-        callback(null, defaultModels);
-    };
-    xhr.onreadystatechange = function() {
-        if (xhr.readyState !== XMLHttpRequest.DONE)
-            return;
-        if (xhr.status >= 200 && xhr.status < 300) {
-            try {
-                var json = JSON.parse(xhr.responseText);
-                var data = Array.isArray(json) ? json : (json && Array.isArray(json.data) ? json.data : []);
-                var found = [];
-                for (var i = 0; i < data.length; i++) {
-                    var id = typeof data[i] === "string" ? data[i] : (data[i] && data[i].id ? data[i].id : "");
-                    if (!id) continue;
-                    var lower = id.toLowerCase();
-                    if (lower.indexOf("tts") >= 0 || lower.indexOf("speech") >= 0 || lower.indexOf("audio") >= 0) {
-                        found.push(id);
-                    }
-                }
-                var combined = defaultModels.slice();
-                for (var j = 0; j < found.length; j++) {
-                    if (combined.indexOf(found[j]) === -1)
-                        combined.push(found[j]);
-                }
-                callback(null, combined);
-            } catch (e) {
-                callback(null, defaultModels);
-            }
-        } else {
-            callback(null, defaultModels);
+    function getJson(url, done) {
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", url);
+        xhr.timeout = 25000;
+        setHeaders(xhr, apiKey);
+        var finished = false;
+        function finish(json) {
+            if (finished) return;
+            finished = true;
+            done(json);
         }
-    };
-    try {
-        xhr.send();
-    } catch (e) {
-        callback(null, defaultModels);
+        xhr.ontimeout = function() { finish(null); };
+        xhr.onreadystatechange = function() {
+            if (xhr.readyState !== XMLHttpRequest.DONE)
+                return;
+            if (xhr.status >= 200 && xhr.status < 300) {
+                try {
+                    finish(JSON.parse(xhr.responseText));
+                } catch (e) {
+                    finish(null);
+                }
+            } else {
+                finish(null);
+            }
+        };
+        try {
+            xhr.send();
+        } catch (e) {
+            finish(null);
+        }
     }
+
+    function voiceNames(list) {
+        var names = [];
+        if (!Array.isArray(list))
+            return names;
+        for (var i = 0; i < list.length; i++) {
+            var v = list[i];
+            var name = typeof v === "string" ? v : (v && (v.id || v.name) ? (v.id || v.name) : "");
+            if (name && names.indexOf(name) === -1)
+                names.push(name);
+        }
+        return names;
+    }
+
+    // output_modalities=speech asks OpenRouter for TTS models (its default
+    // listing is text-only); other servers ignore the parameter.
+    getJson(base + "/models?output_modalities=speech", function(json) {
+        var voices = {};
+        var prices = {};
+        var found = [];
+        var data = Array.isArray(json) ? json : (json && Array.isArray(json.data) ? json.data : []);
+        for (var i = 0; i < data.length; i++) {
+            var id = typeof data[i] === "string" ? data[i] : (data[i] && data[i].id ? data[i].id : "");
+            if (!id || !isSpeechModel(data[i], id)) continue;
+            if (found.indexOf(id) === -1)
+                found.push(id);
+            if (data[i] && data[i].pricing && typeof data[i].pricing === "object")
+                prices[id] = data[i].pricing;
+            var mv = voiceNames(data[i] && data[i].supported_voices);
+            if (mv.length > 0)
+                voices[id] = mv;
+        }
+
+        getJson(base + "/audio/voices", function(vjson) {
+            var sv = voiceNames(vjson && (Array.isArray(vjson) ? vjson : vjson.voices));
+            if (sv.length > 0)
+                voices["*"] = sv;
+            callback(null, found.length > 0 ? found : defaultModels, voices, prices);
+        });
+    });
 }

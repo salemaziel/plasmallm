@@ -8,10 +8,12 @@
 
 .import "openai_transcriptions.js" as OpenaiTranscriptions
 .import "whisper_cli.js" as WhisperCli
+.import "whisper_cpp.js" as WhisperCpp
 
 var backends = {
     "openai_transcriptions": OpenaiTranscriptions,
-    "whisper_cli": WhisperCli
+    "whisper_cli": WhisperCli,
+    "whisper_cpp": WhisperCpp
 };
 
 function get(backendId) {
@@ -22,6 +24,7 @@ function get(backendId) {
 function list() {
     return [
         { id: OpenaiTranscriptions.id, name: OpenaiTranscriptions.displayName },
-        { id: WhisperCli.id, name: WhisperCli.displayName }
+        { id: WhisperCli.id, name: WhisperCli.displayName },
+        { id: WhisperCpp.id, name: WhisperCpp.displayName }
     ];
 }

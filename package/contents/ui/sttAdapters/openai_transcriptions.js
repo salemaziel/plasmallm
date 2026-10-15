@@ -55,6 +55,21 @@ function parseModelIds(responseText) {
     return models;
 }
 
+// { modelId: pricing } from a /models response that carries `pricing`
+// (OpenRouter); empty for hosts that don't publish prices.
+function parseModelPricing(responseText) {
+    var out = {};
+    try {
+        var response = JSON.parse(responseText);
+        var data = response && Array.isArray(response.data) ? response.data : [];
+        for (var i = 0; i < data.length; i++) {
+            if (data[i] && data[i].id && data[i].pricing && typeof data[i].pricing === "object")
+                out[data[i].id] = data[i].pricing;
+        }
+    } catch (e) {}
+    return out;
+}
+
 function knownOpenAiSttModels() {
     return [
         "gpt-transcribe",
@@ -92,7 +107,8 @@ function fetchModels(endpoint, apiKey, callback) {
                 return;
             if (xhr.status >= 200 && xhr.status < 300) {
                 try {
-                    onDone(null, parseModelIds(xhr.responseText), xhr.status);
+                    onDone(null, parseModelIds(xhr.responseText), xhr.status,
+                        parseModelPricing(xhr.responseText));
                 } catch (e) {
                     onDone(i18n("Failed to parse models: %1", e.message || String(e)), null, xhr.status);
                 }
@@ -110,15 +126,29 @@ function fetchModels(endpoint, apiKey, callback) {
     var transcriptionUrl = base + "/models?output_modalities=transcription";
     var plainUrl = base + "/models";
 
-    getJson(transcriptionUrl, function(err, models, status) {
+    // Hosts that ignore output_modalities (Groq) return their chat models
+    // too; keep only speech-looking ids when there are any. OpenRouter's
+    // list is already filtered and has STT models these names would miss.
+    function speechOnly(models) {
+        if (base.indexOf("openrouter.ai") >= 0)
+            return models;
+        var picked = [];
+        for (var i = 0; i < models.length; i++) {
+            if (/whisper|transcri|stt|speech/i.test(models[i]))
+                picked.push(models[i]);
+        }
+        return picked.length > 0 ? picked : models;
+    }
+
+    getJson(transcriptionUrl, function(err, models, status, prices) {
         if (!err && models && models.length > 0) {
-            callback(null, models, status);
+            callback(null, speechOnly(models), status, prices);
             return;
         }
         // OpenRouter: empty/error on plain list still won't include STT; try plain anyway for other hosts.
-        getJson(plainUrl, function(err2, models2, status2) {
+        getJson(plainUrl, function(err2, models2, status2, prices2) {
             if (!err2 && models2 && models2.length > 0) {
-                callback(null, models2, status2);
+                callback(null, speechOnly(models2), status2, prices2);
                 return;
             }
             if (isOpenAiHost(endpoint)) {

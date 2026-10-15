@@ -21,7 +21,9 @@ function getSttConnection(config) {
         cliFp16: !!config.sttCliFp16,
         cliThreads: config.sttCliThreads || 0,
         cliInitialPrompt: config.sttCliInitialPrompt || "",
-        cliExtraArgs: config.sttCliExtraArgs || ""
+        cliExtraArgs: config.sttCliExtraArgs || "",
+        cppBinary: config.sttCppBinary || "whisper-cli",
+        cppModelDirs: config.sttCppModelDirs || ""
     };
 }
 
@@ -119,7 +121,8 @@ function transcribe(opts) {
                 cliFp16: conn.cliFp16,
                 cliThreads: conn.cliThreads,
                 cliInitialPrompt: conn.cliInitialPrompt,
-                cliExtraArgs: conn.cliExtraArgs
+                cliExtraArgs: conn.cliExtraArgs,
+                cppBinary: conn.cppBinary
             });
         } catch (buildErr) {
             callback(buildErr.message || String(buildErr), null);
@@ -194,6 +197,27 @@ function whisperCudaCheckCommand(cliBinary) {
     if (!adapter || typeof adapter.buildCudaCheckCommand !== "function")
         return "";
     return adapter.buildCudaCheckCommand(cliBinary);
+}
+
+function whisperCppScanCommand(modelDirs) {
+    var adapter = SttAdapters.get("whisper_cpp");
+    if (!adapter || typeof adapter.buildScanCommand !== "function")
+        return "";
+    return adapter.buildScanCommand(modelDirs);
+}
+
+function whisperCppParseScan(stdout) {
+    var adapter = SttAdapters.get("whisper_cpp");
+    if (!adapter || typeof adapter.parseScanOutput !== "function")
+        return [];
+    return adapter.parseScanOutput(stdout);
+}
+
+function whisperCppHelpCommand(cppBinary) {
+    var adapter = SttAdapters.get("whisper_cpp");
+    if (!adapter || typeof adapter.buildHelpCommand !== "function")
+        return "";
+    return adapter.buildHelpCommand(cppBinary);
 }
 
 function providerPresets() {

@@ -51,6 +51,7 @@ test:
 	@./tests/run.sh
 	node tests/utils.mjs
 	node tests/tts.mjs
+	node tests/whisper_cpp.mjs
 
 # Translations
 translations: check-translations $(MO_FILES)

@@ -319,6 +319,10 @@ SimpleKCM {
     property string cfg_sttCliInitialPromptDefault
     property string cfg_sttCliExtraArgs
     property string cfg_sttCliExtraArgsDefault
+    property string cfg_sttCppBinary
+    property string cfg_sttCppBinaryDefault
+    property string cfg_sttCppModelDirs
+    property string cfg_sttCppModelDirsDefault
     property string cfg_sttLanguage
     property string cfg_sttLanguageDefault
     property int cfg_sttMaxSeconds
@@ -372,6 +376,10 @@ SimpleKCM {
     property string cfg_ttsCliExtraArgsDefault
     property string cfg_ttsAvailableModels
     property string cfg_ttsAvailableModelsDefault
+    property string cfg_sttModelPrices
+    property string cfg_sttModelPricesDefault
+    property string cfg_ttsAvailableVoices
+    property string cfg_ttsAvailableVoicesDefault
     property bool cfg_useCommandTool
     property bool cfg_useCommandToolDefault
     property bool cfg_commandValidatorEnabled

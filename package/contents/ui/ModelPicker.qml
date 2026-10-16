@@ -43,6 +43,16 @@ RowLayout {
         }
     }
 
+    // Local model files (whisper.cpp) are listed by full path, which cuts off
+    // the part that tells them apart; show just the file name.
+    function shortName(m) {
+        var s = String(m || "");
+        if (s.charAt(0) !== "/" && s.charAt(0) !== "~")
+            return s;
+        var i = s.lastIndexOf("/");
+        return i >= 0 && i < s.length - 1 ? s.substring(i + 1) : s;
+    }
+
     onModelNameChanged: syncIndex()
     onAvailableModelsChanged: syncIndex()
 
@@ -67,9 +77,9 @@ RowLayout {
 
         displayText: {
             if (rootPicker.modelName && rootPicker.modelName.length > 0)
-                return rootPicker.modelName;
+                return rootPicker.shortName(rootPicker.modelName);
             if (currentIndex >= 0 && currentIndex < displayModels.length)
-                return displayModels[currentIndex];
+                return rootPicker.shortName(displayModels[currentIndex]);
             return rootPicker.placeholderText;
         }
 
@@ -135,8 +145,8 @@ RowLayout {
                                 spacing: Kirigami.Units.smallSpacing
                                 QQC2.Label {
                                     Layout.fillWidth: true
-                                    text: modelDelegate.text
-                                    elide: Text.ElideRight
+                                    text: rootPicker.shortName(modelDelegate.text)
+                                    elide: Text.ElideMiddle
                                     color: modelDelegate.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                                 }
                                 QQC2.Label {
@@ -150,7 +160,8 @@ RowLayout {
                                     color: modelDelegate.highlighted ? Kirigami.Theme.highlightedTextColor : Kirigami.Theme.textColor
                                 }
                             }
-                            QQC2.ToolTip.text: !modelDelegate.price ? ""
+                            QQC2.ToolTip.text: !modelDelegate.price
+                                ? (rootPicker.shortName(modelData) !== String(modelData) ? String(modelData) : "")
                                 : modelDelegate.price.free ? i18n("Free")
                                 : modelDelegate.price.label ? i18n("List price (from the endpoint): %1", modelDelegate.price.label)
                                 : i18n("List price per 1M tokens (models.dev): %1 input, %2 output", modelDelegate.price.input, modelDelegate.price.output)

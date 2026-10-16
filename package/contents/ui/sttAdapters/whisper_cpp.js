@@ -9,7 +9,7 @@
 // recordings need no conversion step.
 
 var id = "whisper_cpp";
-var displayName = "whisper.cpp (local CLI)";
+var displayName = "whisper.cpp — C++ (local, faster on CPU)";
 var transport = "cli";
 
 var KNOWN_TASKS = ["transcribe", "translate"];
@@ -30,9 +30,12 @@ function trimStr(value) {
     return String(value || "").replace(/^\s+|\s+$/g, "");
 }
 
-// Where whisper.cpp builds usually land when they are not on PATH
-// (voicemode's install, `cmake --install` to ~/.local).
+// Where whisper.cpp builds usually land when they are not on PATH: the copy
+// built from the Speech settings page (whisperSetup.js) first, so it wins
+// over another CPU build, then voicemode's install, then `cmake --install`.
+var OWN_BUILD_BINARY = "~/.local/share/plasmallm/whisper.cpp/build/bin/whisper-cli";
 var FALLBACK_BINARIES = [
+    OWN_BUILD_BINARY,
     "~/.voicemode/services/whisper/build/bin/whisper-cli",
     "~/.local/bin/whisper-cli"
 ];

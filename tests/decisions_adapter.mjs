@@ -129,7 +129,7 @@ eq(D.presets.length, 2, "two presets");
 eq(D.buildTools({}), [], "no tools");
 
 // --- fetchModels ------------------------------------------------------------
-const REFERRER_DECISIONS = "https://github.com/joshuaeroman/plasmallm";
+const REFERRER_DECISIONS = "https://github.com/salemaziel/plasmallm";
 function fetchOnce(endpoint, key, body, status) {
     let out = null;
     responder = respondJson(body, status);

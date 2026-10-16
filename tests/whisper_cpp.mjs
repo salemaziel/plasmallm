@@ -51,7 +51,7 @@ function throws(fn, re, msg) {
 // identity
 eq(Cpp.id, "whisper_cpp", "adapter id");
 eq(Cpp.transport, "cli", "cli transport");
-eq(Cpp.displayName, "whisper.cpp (local CLI)", "display name");
+eq(Cpp.displayName, "whisper.cpp — C++ (local, faster on CPU)", "display name");
 
 // isConfigured needs enabled + model path
 ok(!Cpp.isConfigured({ enabled: false, model: "/m/ggml-base.bin" }), "disabled is not configured");

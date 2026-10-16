@@ -260,6 +260,12 @@ function pricingProviders(ctx, data) {
         if (best) out.push(best);
         else if (hostHits.length === 1) out.push(hostHits[0]);
     }
+    // models.dev now lists OpenCode under .../inference/... addresses, so the
+    // .../zen/v1 and .../zen/go/v1 endpoints no longer match by prefix, and
+    // both providers share the host. Pick by path instead.
+    if (!out.length && host === "opencode.ai") {
+        out.push(/\/go(\/|$)/.test(endpoint.replace(/^[a-z]+:\/\/[^\/]+/, "")) ? "opencode-go" : "opencode");
+    }
     var mapped = HOST_PROVIDERS[host];
     if (!mapped && /(^|\.|-)aiplatform\.googleapis\.com$/.test(host)) mapped = "google-vertex";
     if (!mapped && Utils.isOpenRouterHost(host)) mapped = "openrouter";

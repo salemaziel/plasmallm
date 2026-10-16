@@ -135,6 +135,8 @@ BaseConfigPage {
     // height, so the page could not scroll and the rows below the list were
     // drawn on top of it.
     Kirigami.FormLayout {
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
         QQC2.CheckBox {
             id: enabledCheck
             Kirigami.FormData.label: i18n("Long-term memory:")
@@ -154,7 +156,7 @@ BaseConfigPage {
             Kirigami.FormData.label: ""
             text: i18n("Pinned memories are added to the system prompt on every message, so keep that set small. Everything else is archived: it costs nothing until the assistant searches for it with the recall tool. Requires Tools to be enabled.")
             wrapMode: Text.Wrap
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
             opacity: 0.7
         }
 
@@ -186,7 +188,7 @@ BaseConfigPage {
                         memoryPage.statusText = result.pinned
                             ? ""
                             : i18n("Added to the archive — the assistant will find it with recall.");
-                        persistMemories();
+                        memoryPage.persistMemories();
                         newMemoryField.text = "";
                     } else if (result.reason === "duplicate") {
                         memoryPage.statusText = i18n("That is already remembered.");
@@ -200,7 +202,7 @@ BaseConfigPage {
             visible: memoryPage.statusText.length > 0
             text: memoryPage.statusText
             wrapMode: Text.Wrap
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
             opacity: 0.7
         }
 
@@ -226,7 +228,7 @@ BaseConfigPage {
                        memoryPage.sourceCounts[MemoryStore.SOURCE_ASSISTANT],
                        memoryPage.sourceCounts[MemoryStore.SOURCE_UNKNOWN])
             wrapMode: Text.Wrap
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
             opacity: 0.7
         }
 
@@ -254,7 +256,7 @@ BaseConfigPage {
         ColumnLayout {
             Kirigami.FormData.label: ""
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 28
+            Layout.maximumWidth: textMaxWidth
             visible: memoryPage.memories.length > 0
             spacing: Kirigami.Units.smallSpacing
 
@@ -279,11 +281,13 @@ BaseConfigPage {
                             QQC2.ToolTip.text: i18n("Keep this in the system prompt")
                             QQC2.ToolTip.visible: hovered
                             onToggled: {
-                                var result = MemoryStore.setPinned(memoryPage.memories, modelData.id, checked);
+                                // Same as the delete button: the row goes away when the list is replaced.
+                                var page = memoryPage;
+                                var result = MemoryStore.setPinned(page.memories, modelData.id, checked);
                                 if (result.changed) {
-                                    memoryPage.memories = result.memories;
-                                    memoryPage.statusText = "";
-                                    persistMemories();
+                                    page.memories = result.memories;
+                                    page.statusText = "";
+                                    page.persistMemories();
                                 } else {
                                     // Put the box back; the model list is the truth.
                                     checked = modelData.pinned === true;
@@ -332,10 +336,13 @@ BaseConfigPage {
                             QQC2.ToolTip.text: i18n("Forget this")
                             QQC2.ToolTip.visible: hovered
                             onClicked: {
-                                var result = MemoryStore.removeMemory(memoryPage.memories, modelData.id);
+                                // Replacing the list destroys this row, and with it the
+                                // row's view of memoryPage, so hold the page in a local.
+                                var page = memoryPage;
+                                var result = MemoryStore.removeMemory(page.memories, modelData.id);
                                 if (result.removed) {
-                                    memoryPage.memories = result.memories;
-                                    persistMemories();
+                                    page.memories = result.memories;
+                                    page.persistMemories();
                                 }
                             }
                         }
@@ -367,7 +374,7 @@ BaseConfigPage {
 
         onAccepted: {
             memoryPage.memories = [];
-            persistMemories();
+            memoryPage.persistMemories();
         }
     }
 }

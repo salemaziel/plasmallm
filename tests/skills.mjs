@@ -468,6 +468,19 @@ ok(!S.isValidSkillName("has_underscore"), "underscore rejected");
     ok(!S.isSkillPath("", roots, homePaths), "empty rejected");
 }
 
+// The built-in user folder added again as an extra folder is scanned once.
+{
+    const roots = S.dedupeRoots([
+        { dir: "/home/u/.local/share/plasmallm/skills", source: "plasmallm" },
+        { dir: "/opt/plasmallm/skills", source: "bundled" },
+        { dir: "/home/u/.local/share/plasmallm/skills/", source: "custom" },
+        { dir: "/home/u/more", source: "custom" },
+    ]);
+    ok(roots.length === 3, "repeated folder dropped");
+    ok(roots[0].source === "plasmallm", "first copy kept");
+    ok(roots[2].dir === "/home/u/more", "other extra folder kept");
+}
+
 if (failed) {
     console.error(failed + " failure(s)");
     process.exit(1);

@@ -6,6 +6,8 @@ PlasmaLLM is a system-aware AI assistant widget for the KDE Plasma 6 desktop. It
 ![KDE Plasma 6](https://img.shields.io/badge/Plasma-6.0%2B-blue)
 ![Qt 6](https://img.shields.io/badge/Qt-6.0%2B-green)
 
+> **Fork note:** This is a fork of [PlasmaLLM by Joshua Roman](https://github.com/joshuaeroman/plasmallm), maintained by [Salem Aziel](https://github.com/salemaziel). It adds features such as voice profiles, a local Kokoro text-to-speech backend and a whisper.cpp speech-to-text backend. Credit for the original widget goes to Joshua Roman.
+
 PlasmaLLM is designed for quick tasks and system-integrated workflows—not as a replacement for full-featured chat applications. It excels at answering technical questions about your system, running terminal commands, and providing an agentic interface for desktop automation.
 
 ## Features
@@ -93,7 +95,7 @@ You can install PlasmaLLM directly from the Plasma widget explorer:
 **Add Widgets** → **Get New Widgets** → **Download New Plasma Widgets** → Search for "PlasmaLLM".
 
 ### From GitHub Releases
-Download the latest `.plasmoid` file from the [Releases](https://github.com/joshuaeroman/plasmallm/releases) page:
+Download the latest `.plasmoid` file from the [Releases](https://github.com/salemaziel/plasmallm/releases) page:
 
 ```bash
 plasmapkg2 --install PlasmaLLM-*.plasmoid
@@ -102,7 +104,7 @@ plasmapkg2 --install PlasmaLLM-*.plasmoid
 ### From Source
 ## Note: Building code directly from master branch may pull in unreleased features without translations from English. Translations are only done in release prep. Checkout a specific tag first if you'd prefer to build a particular release.
 ```bash
-git clone https://github.com/joshuaeroman/plasmallm.git
+git clone https://github.com/salemaziel/plasmallm.git
 cd plasmallm
 make install
 plasmashell --replace &

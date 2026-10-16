@@ -3,7 +3,8 @@
     "KPlugin": {
         "Authors": [
             {
-                "Name": "Joshua Roman"
+                "Name": "Salem Aziel",
+                "Email": "51006863+salemaziel@users.noreply.github.com"
             }
         ],
         "Category": "Utilities",
@@ -12,7 +13,9 @@
         "Id": "com.joshuaroman.plasmallm",
         "License": "GPL-2.0-or-later",
         "Name": "PlasmaLLM",
-        "Version": "3.2.0"
+        "Version": "3.3.0",
+        "Website": "https://github.com/salemaziel/plasmallm",
+        "BugReportUrl": "https://github.com/salemaziel/plasmallm/issues"
     },
     "X-Plasma-API-Minimum-Version": "6.0"
 }

@@ -22,6 +22,7 @@ import "toolManager.js" as ToolManager
 import "driverManager.js" as DriverManager
 import "stt.js" as Stt
 import "tts.js" as Tts
+import "ttsAdapters/kokoroSetup.js" as KokoroSetup
 import "contextCompactor.js" as ContextCompactor
 import "commandValidator.js" as CommandValidator
 import "legacyChatLoader.js" as LegacyChatLoader
@@ -100,6 +101,7 @@ PlasmoidItem {
         var _be = Plasmoid.configuration.ttsBackend;
         var _ep = Plasmoid.configuration.ttsApiEndpoint;
         var _m = Plasmoid.configuration.ttsModelName;
+        var _ku = Plasmoid.configuration.ttsKokoroUrl;
         return Tts.isTtsConfigured(Plasmoid.configuration);
     }
     // One-time post-migration banner (not a chat message — clearChat dismisses it).
@@ -476,11 +478,11 @@ PlasmoidItem {
      */
     function loadTtsApiKey(callback) {
         if (!Tts.isTtsConfigured(Plasmoid.configuration)) {
-            callback(i18n("Text-to-speech is not configured"), "");
+            callback(Tts.notConfiguredMessage(Plasmoid.configuration), "");
             return;
         }
         var conn = Tts.getTtsConnection(Plasmoid.configuration);
-        if (conn.backend === "spd_say" || conn.backend === "custom_cli") {
+        if (conn.backend === "spd_say" || conn.backend === "custom_cli" || conn.backend === "kokoro_local") {
             callback(null, "");
             return;
         }
@@ -573,7 +575,7 @@ PlasmoidItem {
         if (!ttsAvailable) {
             if (readyCb) readyCb();
             root.flushPendingTtsOutput();
-            showSttNotice(i18n("Text-to-speech is not configured. Open Text to Speech settings."));
+            showSttNotice(Tts.notConfiguredMessage(Plasmoid.configuration, true));
             return;
         }
 
@@ -628,6 +630,14 @@ PlasmoidItem {
                 ttsModelName: Plasmoid.configuration.ttsModelName,
                 ttsVoice: Plasmoid.configuration.ttsVoice,
                 ttsResponseFormat: Plasmoid.configuration.ttsResponseFormat,
+                ttsSpeedPercent: Plasmoid.configuration.ttsSpeedPercent,
+                ttsInstructions: Plasmoid.configuration.ttsInstructions,
+                ttsKokoroUrl: Plasmoid.configuration.ttsKokoroUrl,
+                ttsKokoroVoice: Plasmoid.configuration.ttsKokoroVoice,
+                ttsKokoroMixes: Plasmoid.configuration.ttsKokoroMixes,
+                ttsKokoroFormat: Plasmoid.configuration.ttsKokoroFormat,
+                ttsKokoroVolumePercent: Plasmoid.configuration.ttsKokoroVolumePercent,
+                ttsKokoroLangCode: Plasmoid.configuration.ttsKokoroLangCode,
                 ttsRate: Plasmoid.configuration.ttsRate,
                 ttsPitch: Plasmoid.configuration.ttsPitch,
                 ttsLanguage: Plasmoid.configuration.ttsLanguage,
@@ -662,6 +672,7 @@ PlasmoidItem {
                     if (speakErr) {
                         root.flushPendingTtsOutput();
                         showSttNotice(speakErr);
+                        root.notifyKokoroUnreachable(res);
                     }
                 }
             });
@@ -673,6 +684,8 @@ PlasmoidItem {
      */
     function stopSpeech() {
         ++_ttsGen;
+        if (_streamSpeech)
+            releaseStreamSpeechText(_streamSpeech);
         flushPendingTtsOutput();
         root.turnTtsStyleHint = "";
         isSpeaking = false;
@@ -681,6 +694,178 @@ PlasmoidItem {
         var stopCmd = Tts.buildStopCommand(Plasmoid.configuration.ttsBackend);
         if (stopCmd && stopCmd.length) {
             ttsExec.connectSource(stopCmd);
+        }
+    }
+
+    // Speaking a reply while it streams (ttsStreamSpeech): one state object
+    // per user turn, kept across tool-call rounds; null when not in use.
+    property var _streamSpeech: null
+
+    function streamSpeechWanted() {
+        if (!root.ttsAvailable || !Plasmoid.configuration.ttsAutoRead || !Plasmoid.configuration.ttsStreamSpeech)
+            return false;
+        if (Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice)
+            return false;
+        return true;
+    }
+
+    function newStreamSpeech() {
+        return {
+            gen: ++_ttsGen,
+            msgIndex: -1,
+            offset: 0,
+            started: false,
+            textReleased: false,
+            latestText: "",
+            queue: null,
+            buffered: [],
+            finished: false
+        };
+    }
+
+    // Show text held back by "Don't output text until TTS is ready".
+    function releaseStreamSpeechText(s) {
+        if (!s || s.textReleased)
+            return;
+        s.textReleased = true;
+        if (streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count && s.latestText) {
+            displayMessages.setProperty(streamingMessageIndex, "content", s.latestText);
+            root.chatContentChanged();
+        }
+        root.flushPendingTtsOutput();
+    }
+
+    // "Speaking…" and the speaker icon are set by onBusy, when a chunk that
+    // has something to say is actually queued.
+    function startStreamSpeechQueue(s) {
+        s.started = true;
+        loadTtsApiKey(function(err, apiKey) {
+            if (s.gen !== root._ttsGen) {
+                root.releaseStreamSpeechText(s);
+                return;
+            }
+            if (err) {
+                isSpeaking = false;
+                speakingMessageIndex = -1;
+                ttsStatusText = "";
+                root.releaseStreamSpeechText(s);
+                showSttNotice(err);
+                return;
+            }
+            var cfg = {
+                ttsEnabled: Plasmoid.configuration.ttsEnabled,
+                ttsStyleHint: "",
+                ttsBackend: Plasmoid.configuration.ttsBackend,
+                ttsProviderName: Plasmoid.configuration.ttsProviderName,
+                ttsApiEndpoint: Plasmoid.configuration.ttsApiEndpoint,
+                ttsModelName: Plasmoid.configuration.ttsModelName,
+                ttsVoice: Plasmoid.configuration.ttsVoice,
+                ttsResponseFormat: Plasmoid.configuration.ttsResponseFormat,
+                ttsSpeedPercent: Plasmoid.configuration.ttsSpeedPercent,
+                ttsInstructions: Plasmoid.configuration.ttsInstructions,
+                ttsKokoroUrl: Plasmoid.configuration.ttsKokoroUrl,
+                ttsKokoroVoice: Plasmoid.configuration.ttsKokoroVoice,
+                ttsKokoroMixes: Plasmoid.configuration.ttsKokoroMixes,
+                ttsKokoroFormat: Plasmoid.configuration.ttsKokoroFormat,
+                ttsKokoroVolumePercent: Plasmoid.configuration.ttsKokoroVolumePercent,
+                ttsKokoroLangCode: Plasmoid.configuration.ttsKokoroLangCode,
+                ttsRate: Plasmoid.configuration.ttsRate,
+                ttsPitch: Plasmoid.configuration.ttsPitch,
+                ttsLanguage: Plasmoid.configuration.ttsLanguage,
+                ttsCliBinary: Plasmoid.configuration.ttsCliBinary,
+                ttsCliTemplate: Plasmoid.configuration.ttsCliTemplate,
+                ttsCliExtraArgs: Plasmoid.configuration.ttsCliExtraArgs
+            };
+            s.queue = Tts.createSpeechQueue({
+                config: cfg,
+                apiKey: apiKey,
+                isCancelled: function() {
+                    return s.gen !== root._ttsGen;
+                },
+                runCommand: function(cmd, cb, cmdReady) {
+                    pendingTtsRuns[cmd] = {
+                        cb: cb,
+                        onReady: cmdReady,
+                        gen: s.gen,
+                        readyCalled: false
+                    };
+                    ttsExec.connectSource(cmd);
+                },
+                onReady: function() {
+                    root.releaseStreamSpeechText(s);
+                },
+                // Nothing playing while a tool runs: clear "Speaking…".
+                onIdle: function() {
+                    if (s.gen !== root._ttsGen)
+                        return;
+                    isSpeaking = false;
+                    ttsStatusText = "";
+                },
+                onBusy: function() {
+                    if (s.gen !== root._ttsGen)
+                        return;
+                    isSpeaking = true;
+                    speakingMessageIndex = s.msgIndex;
+                    ttsStatusText = i18n("Speaking…");
+                },
+                onDone: function(speakErr, info) {
+                    if (s.gen !== root._ttsGen)
+                        return;
+                    isSpeaking = false;
+                    speakingMessageIndex = -1;
+                    ttsStatusText = "";
+                    root.turnTtsStyleHint = "";
+                    if (speakErr) {
+                        showSttNotice(speakErr);
+                        root.notifyKokoroUnreachable(info);
+                    }
+                }
+            });
+            for (var i = 0; i < s.buffered.length; i++)
+                s.queue.push(s.buffered[i], root.effectiveTtsStyleHint());
+            s.buffered = [];
+            if (s.finished)
+                s.queue.finish();
+        });
+    }
+
+    /**
+     * Feed the reply text so far to the speech queue.
+     * `mode`: "chunk" while streaming; "round" at the end of a tool-call
+     * round (speak what is left, keep the queue open); "final" at the end of
+     * the user turn (speak what is left and close the queue).
+     */
+    function feedStreamSpeech(text, mode, msgIndex) {
+        var isFinal = mode === "final";
+        var takeAll = isFinal || mode === "round";
+        var s = _streamSpeech;
+        if (!s)
+            return;
+        // The bubble being spoken, for the speaker icon.
+        var idx = (msgIndex !== undefined && msgIndex >= 0) ? msgIndex : streamingMessageIndex;
+        if (idx >= 0)
+            s.msgIndex = idx;
+        s.latestText = text || "";
+        if (s.gen !== root._ttsGen) {
+            root.releaseStreamSpeechText(s);
+            return;
+        }
+        var res = Tts.takeSpeakableChunks(s.latestText, s.offset, takeAll, !s.started && s.buffered.length === 0);
+        s.offset = res.offset;
+        if (res.chunks.length > 0 && !s.started)
+            root.startStreamSpeechQueue(s);
+        for (var i = 0; i < res.chunks.length; i++) {
+            if (s.queue)
+                s.queue.push(res.chunks[i], root.effectiveTtsStyleHint());
+            else
+                s.buffered.push(res.chunks[i]);
+        }
+        if (isFinal) {
+            s.finished = true;
+            if (!s.started)
+                root.releaseStreamSpeechText(s);
+            else if (s.queue)
+                s.queue.finish();
         }
     }
 
@@ -2310,7 +2495,7 @@ PlasmoidItem {
                 }
             } catch (e) {}
         }
-        return roots;
+        return Skills.dedupeRoots(roots);
     }
 
     function loadSkills(force, prefixCmd) {
@@ -3666,6 +3851,14 @@ PlasmoidItem {
         }
         // Add a placeholder assistant message for streaming
         streamingMessageIndex = root.appendDisplayMessage("assistant", "", { turnId: currentTurnId });
+        if (toolCallDepth === 0)
+            root._streamSpeech = root.streamSpeechWanted() ? root.newStreamSpeech() : null;
+        else if (root._streamSpeech)
+        {
+            // each request streams its own text from the start
+            root._streamSpeech.offset = 0;
+            root._streamSpeech.latestText = "";
+        }
 
         // Build messages array from ListModel, capping to avoid unbounded growth
         var messages = [];
@@ -3825,9 +4018,15 @@ PlasmoidItem {
                     requestUsage = root.priceRequestUsage(usage);
                 },
                 onChunk: function(delta, accumulated) {
-                    var suppressText = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && Plasmoid.configuration.ttsWaitUntilReady;
-                    if (suppressText && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
-                        suppressText = false;
+                    var suppressText;
+                    if (root._streamSpeech) {
+                        root.feedStreamSpeech(accumulated, "chunk");
+                        suppressText = Plasmoid.configuration.ttsWaitUntilReady && !root._streamSpeech.textReleased;
+                    } else {
+                        suppressText = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && Plasmoid.configuration.ttsWaitUntilReady;
+                        if (suppressText && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
+                            suppressText = false;
+                        }
                     }
                     if (!suppressText && streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count) {
                         displayMessages.setProperty(streamingMessageIndex, "content", accumulated);
@@ -3852,6 +4051,8 @@ PlasmoidItem {
                 // Handle tool calls
                 var limitApplies = enableToolCallLimit && !DriverManager.isSessionActive;
                 if (toolCalls && toolCalls.length > 0 && (!limitApplies || toolCallDepth < maxToolCallDepth)) {
+                    // Speak the rest of this round's text before the tools run.
+                    root.feedStreamSpeech(fullText || "", "round");
                     toolCallDepth++;
                     // Append the assistant's tool_call message to chat history
                     var thinkingJson = (assistantMsg && assistantMsg.thinkingBlocks && assistantMsg.thinkingBlocks.length > 0)
@@ -3949,6 +4150,8 @@ PlasmoidItem {
                         displayMessages.remove(streamingMessageIndex);
                     }
                     streamingMessageIndex = -1;
+                    // Finish whatever was already being spoken.
+                    root.feedStreamSpeech("", "final");
                     root.appendDisplayMessage("error", "Error: " + error, { turnId: currentTurnId });
                 } else {
                     var effectiveStyle = root.effectiveTtsStyleHint();
@@ -3966,11 +4169,15 @@ PlasmoidItem {
                         usage_json: requestUsageJson
                     });
                     
-                    var allowStreamSpeech = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && fullText && fullText.length > 0;
+                    // Spoken while streaming: only the rest is left to say.
+                    var streamSpeech = root._streamSpeech;
+                    var allowStreamSpeech = !streamSpeech && root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && fullText && fullText.length > 0;
                     if (allowStreamSpeech && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
                         allowStreamSpeech = false;
                     }
-                    var waitStreamTts = allowStreamSpeech && Plasmoid.configuration.ttsWaitUntilReady;
+                    var waitStreamTts = streamSpeech
+                        ? (Plasmoid.configuration.ttsWaitUntilReady && !streamSpeech.textReleased && fullText.length > 0)
+                        : (allowStreamSpeech && Plasmoid.configuration.ttsWaitUntilReady);
 
                     if (streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count) {
                         displayMessages.setProperty(streamingMessageIndex, "apiMsgId", astMsgId);
@@ -3997,7 +4204,9 @@ PlasmoidItem {
                     saveChat();
                     triggerBackgroundCompactionIfNeeded();
 
-                    if (allowStreamSpeech) {
+                    if (streamSpeech) {
+                        root.feedStreamSpeech(fullText, "final", msgIdxForSpeak);
+                    } else if (allowStreamSpeech) {
                         root.speakMessage(fullText, msgIdxForSpeak, function() {
                             root.flushPendingTtsOutput();
                         }, effectiveStyle);
@@ -4044,6 +4253,107 @@ PlasmoidItem {
         var escapedMessage = (message || "").replace(/'/g, "'\\''");
         var cmd = "notify-send -- '" + escapedTitle + "' '" + escapedMessage + "'";
         executable.connectSource(cmd);
+    }
+
+    // Kokoro (local) could not be reached while speaking (curl could not
+    // connect, after the synthesize command's own retries). One notification
+    // per burst of failures: the Start action runs the start command for a
+    // stopped Kokoro unit if systemd lists one; with none known, the action
+    // opens the settings window instead. The lookup is read-only.
+    property double _kokoroNoteAt: 0
+    property int _kokoroCmdSeq: 0
+    property var _kokoroLookups: ({})
+    property var kokoroNotification: null
+
+    P5Support.DataSource {
+        id: kokoroCmdSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            var exitCode = data["exit code"];
+            if (exitCode === undefined)
+                return;
+            disconnectSource(source);
+            var failed = exitCode !== 0 && exitCode !== "0";
+            if (/^: plasmallm-kokoro-units-/.test(source)) {
+                var endpoint = root._kokoroLookups[source];
+                delete root._kokoroLookups[source];
+                if (endpoint !== undefined)
+                    root.showKokoroNotification(endpoint, failed ? "" : KokoroSetup.pickStartUnit(data.stdout || ""));
+            } else if (/^: plasmallm-kokoro-start-/.test(source) && failed) {
+                root.showSttNotice(i18n("Kokoro could not be started: %1",
+                    String(data.stderr || "").replace(/^\s+|\s+$/g, "") || i18n("exit %1", exitCode)));
+            }
+        }
+    }
+
+    Component {
+        id: kokoroNotificationComponent
+        Notification {
+            id: kokoroNote
+            property string unit: ""
+            property bool closing: false
+            componentName: "plasma_workspace"
+            eventId: "notification"
+            iconName: "dialog-warning"
+            autoDelete: false
+            property NotificationAction startAction: NotificationAction {
+                label: i18n("Start")
+                onActivated: root.startKokoroUnit(kokoroNote.unit)
+            }
+            property NotificationAction settingsAction: NotificationAction {
+                label: i18n("Open settings")
+                onActivated: Plasmoid.internalAction("configure").trigger()
+            }
+            actions: unit.length > 0 ? [startAction] : [settingsAction]
+            onClosed: {
+                if (root.kokoroNotification === kokoroNote)
+                    root.kokoroNotification = null;
+                if (!kokoroNote.closing)
+                    kokoroNote.destroy();
+            }
+        }
+    }
+
+    /** info is what Tts.speak / the speech queue hand back with a failure. */
+    function notifyKokoroUnreachable(info) {
+        if (!info || !info.unreachable || info.backend !== "kokoro_local")
+            return;
+        var now = Date.now();
+        if (!KokoroSetup.notifyAllowed(root._kokoroNoteAt, now))
+            return;
+        root._kokoroNoteAt = now;
+        var cmd = KokoroSetup.buildUnitLookupCommand(now + "-" + (++root._kokoroCmdSeq));
+        root._kokoroLookups[cmd] = info.endpoint || "";
+        kokoroCmdSource.connectSource(cmd);
+    }
+
+    function showKokoroNotification(endpoint, unit) {
+        var old = root.kokoroNotification;
+        if (old) {
+            root.kokoroNotification = null;
+            old.closing = true;
+            old.close();
+            old.destroy(2000);
+        }
+        // Plasma renders the body as markup.
+        var text = i18n("Kokoro isn't running at %1.", endpoint)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        var note = kokoroNotificationComponent.createObject(root, {
+            unit: unit || "",
+            title: i18n("PlasmaLLM"),
+            text: text
+        });
+        if (!note)
+            return;
+        root.kokoroNotification = note;
+        note.sendEvent();
+    }
+
+    function startKokoroUnit(unit) {
+        if (!unit)
+            return;
+        kokoroCmdSource.connectSource(KokoroSetup.buildStartCommand(unit, Date.now() + "-" + (++root._kokoroCmdSeq)));
     }
 
     // Approve / Deny from the desktop notification while the panel is closed.

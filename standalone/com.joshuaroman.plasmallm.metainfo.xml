@@ -17,10 +17,10 @@
     </p>
   </description>
   <launchable type="desktop-id">com.joshuaroman.plasmallm.desktop</launchable>
-  <developer id="com.joshuaroman">
-    <name>Joshua Roman</name>
+  <developer id="io.github.salemaziel">
+    <name>Salem Aziel</name>
   </developer>
-  <url type="homepage">https://github.com/joshuaeroman/plasmallm</url>
-  <url type="bugtracker">https://github.com/joshuaeroman/plasmallm/issues</url>
+  <url type="homepage">https://github.com/salemaziel/plasmallm</url>
+  <url type="bugtracker">https://github.com/salemaziel/plasmallm/issues</url>
   <content_rating type="oars-1.1"/>
 </component>

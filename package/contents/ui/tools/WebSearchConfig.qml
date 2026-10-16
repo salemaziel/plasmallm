@@ -309,6 +309,6 @@ ColumnLayout {
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+        Layout.maximumWidth: typeof configPage !== 'undefined' ? configPage.textMaxWidth : Kirigami.Units.gridUnit * 28
     }
 }

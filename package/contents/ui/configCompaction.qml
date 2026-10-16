@@ -32,6 +32,10 @@ BaseConfigPage {
     property int testStatusType: Kirigami.MessageType.Information
     property bool testInProgress: false
     property string testResponseContent: ""
+    property bool modelCheckInProgress: false
+    property string modelCheckMessage: ""
+    property int modelCheckType: Kirigami.MessageType.Information
+    property int _modelCheckGen: 0
 
     readonly property string defaultInstructions:
         "Summarize this conversation. Be very concise and use shorthand and abbreviations when possible. No prose. Retain important specifics when brief. For larger specifics like logs, use of restore_context/recall_attachment tool will work instead. Cite every item with a msgId or msgId range, e.g. [1], [3-6], [2,7-10]\n\n" +
@@ -157,6 +161,67 @@ BaseConfigPage {
         });
     }
 
+    // Fetches the chosen profile's model list and says whether its model is
+    // still offered. Results from a profile that is no longer selected are dropped.
+    function refreshCompactionModels() {
+        var prof = selectedProfileData;
+        var ep = (prof.apiEndpoint || "").trim();
+        var model = (prof.modelName || "").trim();
+        var gen = ++_modelCheckGen;
+        if (!ep) {
+            modelCheckMessage = i18n("Selected profile does not have an endpoint URL configured.");
+            modelCheckType = Kirigami.MessageType.Error;
+            return;
+        }
+        modelCheckInProgress = true;
+        modelCheckMessage = i18n("Checking available models…");
+        modelCheckType = Kirigami.MessageType.Information;
+        loadProfileKey(prof, function(key) {
+            if (gen !== _modelCheckGen)
+                return;
+            var opts = {
+                geminiApiVariant: prof.geminiApiVariant,
+                geminiAuthMethod: prof.geminiAuthMethod,
+                geminiVertexAuthType: prof.geminiVertexAuthType,
+                geminiProjectId: prof.geminiProjectId,
+                geminiLocation: prof.geminiLocation,
+                providerName: prof.providerName,
+                attribution: cfg_openrouterAttribution
+            };
+            var apiType = Api.resolvedApiType(prof.apiType || "openai", prof.geminiApiVariant,
+                prof.geminiAuthMethod, prof.geminiVertexAuthType);
+            Api.fetchModels(apiType, ep, key, prof.usesResponsesAPI, opts, function(error, models) {
+                if (gen !== _modelCheckGen)
+                    return;
+                modelCheckInProgress = false;
+                if (error) {
+                    modelCheckMessage = i18n("Couldn't load models: %1", String(error));
+                    modelCheckType = Kirigami.MessageType.Error;
+                    return;
+                }
+                var list = models || [];
+                var found = false;
+                for (var i = 0; i < list.length; i++) {
+                    var id = (list[i] && typeof list[i] === "object") ? list[i].id : list[i];
+                    if (String(id) === model) {
+                        found = true;
+                        break;
+                    }
+                }
+                if (!model) {
+                    modelCheckMessage = i18n("%1 models available. This profile has no model set.", list.length);
+                    modelCheckType = Kirigami.MessageType.Warning;
+                } else if (found) {
+                    modelCheckMessage = i18n("%1 models available. %2 is available.", list.length, model);
+                    modelCheckType = Kirigami.MessageType.Positive;
+                } else {
+                    modelCheckMessage = i18n("%1 models available. %2 isn't in the list; change it in the profile.", list.length, model);
+                    modelCheckType = Kirigami.MessageType.Warning;
+                }
+            });
+        });
+    }
+
     function testCompactionConnection() {
         var prof = selectedProfileData;
         var ep = (prof.apiEndpoint || "").trim();
@@ -229,6 +294,8 @@ BaseConfigPage {
     // unwrapped line, which made the form wider than the settings window.
     Kirigami.FormLayout {
         id: formLayout
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
 
         QQC2.CheckBox {
             id: compactionEnabledBox
@@ -240,7 +307,8 @@ BaseConfigPage {
 
         QQC2.Label {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             opacity: 0.75
@@ -259,20 +327,25 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Model Profile:")
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             model: configPage.profileChoices
             textRole: "name"
             onActivated: function(index) {
                 if (index >= 0 && index < configPage.profileChoices.length) {
                     cfg_compactionProfileId = configPage.profileChoices[index].id;
                 }
+                // A check for the previous profile no longer applies.
+                configPage._modelCheckGen++;
+                configPage.modelCheckInProgress = false;
+                configPage.modelCheckMessage = "";
             }
         }
 
         QQC2.Label {
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             // Wrap, not WordWrap: an endpoint URL has no spaces to break at.
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
@@ -284,6 +357,34 @@ BaseConfigPage {
                     p.modelName || i18n("None"),
                     p.apiEndpoint || i18n("None"));
             }
+        }
+
+        RowLayout {
+            visible: compactionEnabledBox.checked
+            spacing: Kirigami.Units.smallSpacing
+
+            QQC2.Button {
+                text: i18n("Refresh models")
+                icon.name: "view-refresh"
+                enabled: !configPage.modelCheckInProgress
+                onClicked: configPage.refreshCompactionModels()
+            }
+
+            QQC2.BusyIndicator {
+                running: configPage.modelCheckInProgress
+                visible: configPage.modelCheckInProgress
+                Layout.preferredWidth: Kirigami.Units.iconSizes.small
+                Layout.preferredHeight: Kirigami.Units.iconSizes.small
+            }
+        }
+
+        Kirigami.InlineMessage {
+            visible: compactionEnabledBox.checked && configPage.modelCheckMessage.length > 0
+            Layout.fillWidth: true
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
+            type: configPage.modelCheckType
+            text: configPage.modelCheckMessage
         }
 
         Kirigami.Separator {
@@ -298,7 +399,7 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Trigger Condition:")
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             model: [
                 { id: "chars", name: i18n("By Character Count") },
                 { id: "turns", name: i18n("By Turn Count") },
@@ -404,7 +505,7 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Instructions template:")
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             Layout.minimumHeight: 140
             wrapMode: TextEdit.Wrap
             text: cfg_compactionInstructions || configPage.defaultInstructions
@@ -431,7 +532,8 @@ BaseConfigPage {
         QQC2.Label {
             visible: compactionEnabledBox.checked
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             wrapMode: Text.WordWrap
             font: Kirigami.Theme.smallFont
             opacity: 0.75
@@ -465,7 +567,7 @@ BaseConfigPage {
 
             QQC2.ScrollView {
                 Layout.fillWidth: true
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+                Layout.maximumWidth: textMaxWidth
                 Layout.minimumHeight: Kirigami.Units.gridUnit * 5
                 Layout.maximumHeight: Kirigami.Units.gridUnit * 8
 
@@ -501,7 +603,8 @@ BaseConfigPage {
 
         Kirigami.InlineMessage {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             type: configPage.testStatusType
             text: configPage.testStatusMessage
             visible: configPage.testStatusMessage.length > 0 && !configPage.testInProgress
@@ -523,7 +626,7 @@ BaseConfigPage {
 
             QQC2.ScrollView {
                 Layout.fillWidth: true
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+                Layout.maximumWidth: textMaxWidth
                 Layout.minimumHeight: Kirigami.Units.gridUnit * 6
                 Layout.maximumHeight: Kirigami.Units.gridUnit * 12
 

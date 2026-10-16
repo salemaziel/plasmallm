@@ -70,7 +70,7 @@ function isOpenRouterProvider(providerName, endpoint) {
 function applyOpenRouterAttribution(xhr, opts, endpoint) {
     if (opts && opts.attribution === true &&
         isOpenRouterProvider(opts.providerName, endpoint)) {
-        xhr.setRequestHeader("HTTP-Referer", "https://github.com/joshuaeroman/plasmallm");
+        xhr.setRequestHeader("HTTP-Referer", "https://github.com/salemaziel/plasmallm");
         xhr.setRequestHeader("X-OpenRouter-Title", "PlasmaLLM");
     }
 }

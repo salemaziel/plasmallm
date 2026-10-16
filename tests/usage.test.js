@@ -86,6 +86,13 @@ eq('openrouter by api url', U.pricingProviders({ apiType: 'openai', endpoint: 'h
 eq('openrouter even before data loads', U.pricingProviders({ apiType: 'openai', endpoint: 'https://openrouter.ai/api/v1' }, null), ['openrouter']);
 eq('opencode go beats zen (longest prefix)', U.pricingProviders({ apiType: 'opencode', endpoint: 'https://opencode.ai/zen/go/v1' }, DATA), ['opencode-go']);
 eq('opencode zen', U.pricingProviders({ apiType: 'opencode', endpoint: 'https://opencode.ai/zen/v1' }, DATA), ['opencode']);
+// models.dev's current OpenCode entries list .../inference/... addresses.
+const NEW_OC = {
+  opencode: { api: 'https://opencode.ai/inference/openai/v1', models: {} },
+  'opencode-go': { api: 'https://opencode.ai/inference/go/openai/v1', models: {} },
+};
+eq('opencode zen with current models.dev urls', U.pricingProviders({ apiType: 'opencode', endpoint: 'https://opencode.ai/zen/v1' }, NEW_OC), ['opencode']);
+eq('opencode go with current models.dev urls', U.pricingProviders({ apiType: 'opencode', endpoint: 'https://opencode.ai/zen/go/v1' }, NEW_OC), ['opencode-go']);
 eq('deepseek with /v1 suffix', U.pricingProviders({ apiType: 'openai', endpoint: 'https://api.deepseek.com/v1' }, DATA), ['deepseek']);
 eq('local endpoint: nothing guessed', U.pricingProviders({ apiType: 'openai', endpoint: 'http://localhost:11434/v1' }, DATA), []);
 eq('local endpoint never matches a localhost api url', U.pricingProviders({ apiType: 'openai', endpoint: 'http://localhost:8080/v1' }, DATA), []);

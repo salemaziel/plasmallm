@@ -4,6 +4,7 @@
 */
 
 .import "ttsAdapters/index.js" as TtsAdapters
+.import "ttsAdapters/speechRules.js" as SpeechRules
 
 function _i18n(str, arg1, arg2) {
     if (typeof i18n === "function") {
@@ -21,20 +22,61 @@ function _i18n(str, arg1, arg2) {
     return res;
 }
 
+function percentOr100(value) {
+    var n = Number(value);
+    return isFinite(n) && n > 0 ? n : 100;
+}
+
 function getTtsConnection(config) {
     if (!config)
         return null;
+    // Kokoro (local) keeps its own URL, voice and format, so switching
+    // backends doesn't overwrite the endpoint backend's settings.
+    if ((config.ttsBackend || "") === "kokoro_local") {
+        return {
+            enabled: !!config.ttsEnabled,
+            autoRead: !!config.ttsAutoRead,
+            autoReadOnlyVoicePrompted: !!config.ttsAutoReadOnlyVoicePrompted,
+            styleHint: config.ttsStyleHint || "",
+            backend: "kokoro_local",
+            providerName: "",
+            endpoint: config.ttsKokoroUrl || "",
+            model: "kokoro",
+            voice: config.ttsKokoroVoice || "",
+            responseFormat: config.ttsKokoroFormat || "",
+            speedPercent: percentOr100(config.ttsSpeedPercent),
+            instructions: "",
+            volumePercent: percentOr100(config.ttsKokoroVolumePercent),
+            langCode: config.ttsKokoroLangCode || "",
+            rate: 0,
+            pitch: 0,
+            language: "",
+            cliBinary: "",
+            cliTemplate: "",
+            cliExtraArgs: ""
+        };
+    }
+    // "Model default" is only meaningful to the endpoint backend; the others
+    // share the same voice setting and must not be handed its marker.
+    var backend = config.ttsBackend || "spd_say";
+    var voice = config.ttsVoice || "";
+    if (backend !== "openai_speech" && SpeechRules.isModelDefaultVoice(voice))
+        voice = "";
     return {
         enabled: !!config.ttsEnabled,
         autoRead: !!config.ttsAutoRead,
         autoReadOnlyVoicePrompted: !!config.ttsAutoReadOnlyVoicePrompted,
         styleHint: config.ttsStyleHint || "",
-        backend: config.ttsBackend || "spd_say",
+        backend: backend,
         providerName: config.ttsProviderName || "",
         endpoint: config.ttsApiEndpoint || "",
         model: config.ttsModelName || "",
-        voice: config.ttsVoice || "",
+        voice: voice,
         responseFormat: config.ttsResponseFormat || "",
+        speedPercent: percentOr100(config.ttsSpeedPercent),
+        instructions: config.ttsInstructions || "",
+        volumePercent: 100,
+        langCode: "",
         rate: config.ttsRate || 0,
         pitch: config.ttsPitch || 0,
         language: config.ttsLanguage || "",
@@ -54,6 +96,50 @@ function isTtsConfigured(config) {
     if (!c.enabled)
         return false;
     return true;
+}
+
+/**
+ * What to tell the user when speaking can't start. Kokoro (local) with an
+ * empty Server URL says so; every other case keeps the generic message.
+ * @param {object} config
+ * @param {boolean} [withHint]  the generic message also says where to go (the widget's wording)
+ */
+function notConfiguredMessage(config, withHint) {
+    // The strings are written out as i18n("…") calls, not through _i18n():
+    // xgettext only picks up i18n, and these were extracted from main.qml
+    // before. Without i18n (Node) the plain text is used.
+    var tr = typeof i18n === "function";
+    if (config && (config.ttsBackend || "") === "kokoro_local" && config.ttsEnabled
+            && !String(config.ttsKokoroUrl || "").replace(/^\s+|\s+$/g, "").length)
+        return tr ? i18n("Kokoro server URL isn't set. Open Settings → Text to Speech.")
+                  : "Kokoro server URL isn't set. Open Settings → Text to Speech.";
+    if (withHint)
+        return tr ? i18n("Text-to-speech is not configured. Open Text to Speech settings.")
+                  : "Text-to-speech is not configured. Open Text to Speech settings.";
+    return tr ? i18n("Text-to-speech is not configured") : "Text-to-speech is not configured";
+}
+
+/**
+ * A failed run of a speech command: the message, and, when the adapter says
+ * the server could not be reached (Kokoro, after its retries), a small info
+ * object the widget uses to offer starting it. Null when the run succeeded.
+ * @returns {{err: string, info: ?{unreachable: boolean, backend: string, endpoint: string}}|null}
+ */
+function _failure(adapter, conn, proc) {
+    if (!adapter || typeof adapter.parseResult !== "function")
+        return null;
+    proc = proc || {};
+    var parsed = adapter.parseResult(proc.stdout, proc.stderr, proc.exitCode);
+    if (!parsed || !parsed.err)
+        return null;
+    if (parsed.unreachable) {
+        var endpoint = String(conn.endpoint || "").replace(/^\s+|\s+$/g, "");
+        return {
+            err: _i18n("Kokoro isn't running at %1.", endpoint),
+            info: { unreachable: true, backend: conn.backend, endpoint: endpoint }
+        };
+    }
+    return { err: parsed.err, info: null };
 }
 
 var KNOWN_GEMINI_VOICES = [
@@ -154,6 +240,8 @@ function cleanTextForSpeech(text) {
             return " " + trimmed + " ";
         return " [code block] ";
     });
+    // A fence never closed (reply cut off mid-block) is still code.
+    s = s.replace(/```[\s\S]*$/, " [code block] ");
 
     // Remove images: ![alt](url)
     s = s.replace(/!\[[^\]]*\]\([^)]+\)/g, " ");
@@ -268,6 +356,332 @@ function buildStopCommand(backendId) {
 }
 
 /**
+ * Build the adapter command for already-prepared text. Throws on bad config.
+ */
+function buildSpeechCommand(adapter, conn, preparedText, apiKey) {
+    return adapter.buildCommand({
+        text: preparedText,
+        endpoint: conn.endpoint,
+        apiKey: apiKey || "",
+        model: conn.model,
+        voice: conn.voice,
+        responseFormat: conn.responseFormat,
+        providerName: conn.providerName || "",
+        speed: (conn.speedPercent || 100) / 100,
+        instructions: conn.instructions || "",
+        volumeMultiplier: (conn.volumePercent || 100) / 100,
+        langCode: conn.langCode || "",
+        rate: conn.rate,
+        pitch: conn.pitch,
+        language: conn.language,
+        cliBinary: conn.cliBinary,
+        cliTemplate: conn.cliTemplate,
+        extraArgs: conn.cliExtraArgs
+    });
+}
+
+// Chunk sizes for speaking a reply while it streams. The first chunk is one
+// sentence so the voice starts early; later ones group sentences so there
+// are fewer requests and the phrasing sounds natural.
+var STREAM_FIRST_CHUNK_MIN = 4;
+var STREAM_CHUNK_TARGET = 120;
+var STREAM_CHUNK_MAX = 300;
+
+// [start, end) ranges of code fences and <think>/<thought> blocks; an
+// unclosed one runs to Infinity. Chunks are never cut inside these, so the
+// speech cleaner still sees whole blocks.
+function _blockedRanges(text) {
+    var ranges = [];
+    var fences = [];
+    var re = /```/g;
+    var m;
+    while ((m = re.exec(text)) !== null)
+        fences.push(m.index);
+    for (var i = 0; i < fences.length; i += 2) {
+        ranges.push([fences[i], i + 1 < fences.length ? fences[i + 1] + 3 : Infinity]);
+    }
+    var thinkRe = /<(think|thought)\b[^>]*>/gi;
+    while ((m = thinkRe.exec(text)) !== null) {
+        var close = text.toLowerCase().indexOf("</" + m[1].toLowerCase() + ">", m.index);
+        var end = close >= 0 ? close + m[1].length + 3 : Infinity;
+        ranges.push([m.index, end]);
+        if (end === Infinity)
+            break;
+        thinkRe.lastIndex = end;
+    }
+    return ranges;
+}
+
+function _isBlocked(ranges, pos) {
+    for (var i = 0; i < ranges.length; i++) {
+        if (pos > ranges[i][0] && pos < ranges[i][1])
+            return true;
+    }
+    return false;
+}
+
+// True when `seg` (the paragraph so far) ends inside inline code, bold,
+// italics, or a link, so cutting there would leave markup or a URL to be
+// read aloud. Markdown spans can cross a single line break, not a blank line.
+function _inlineOpen(seg) {
+    var s = seg.replace(/```/g, "").replace(/^[ \t]*[*+-][ \t]/gm, "");
+    if ((s.match(/`/g) || []).length % 2 === 1)
+        return true;
+    if ((s.match(/\*\*/g) || []).length % 2 === 1)
+        return true;
+    if ((s.replace(/\*\*/g, "").match(/\*/g) || []).length % 2 === 1)
+        return true;
+    // Underscores inside words (snake_case) are not emphasis.
+    var underOpen = (s.match(/(^|[^\w])_+(?=\S)/g) || []).length;
+    var underClose = (s.match(/\S_+(?=[^\w]|$)/g) || []).length;
+    if (underOpen > underClose)
+        return true;
+    if (s.lastIndexOf("[") > s.lastIndexOf("]"))
+        return true;
+    var linkUrl = s.lastIndexOf("](");
+    if (linkUrl >= 0 && s.indexOf(")", linkUrl + 2) < 0)
+        return true;
+    return false;
+}
+
+/**
+ * Take the finished part of a streaming reply as chunks to speak.
+ *
+ * @param {string} text        Reply text so far (raw markdown)
+ * @param {number} offset      Where the previous call stopped
+ * @param {boolean} isFinal    The reply is complete; take everything left
+ * @param {boolean} firstChunk Nothing has been spoken yet; one sentence is enough
+ * @returns {{chunks: string[], offset: number}}
+ */
+function takeSpeakableChunks(text, offset, isFinal, firstChunk) {
+    text = String(text || "");
+    var start = Math.max(0, Math.min(offset || 0, text.length));
+    var chunks = [];
+    // A first chunk of a few characters at least, so a list marker like
+    // "1." is not spoken on its own.
+    var minLen = firstChunk ? STREAM_FIRST_CHUNK_MIN : STREAM_CHUNK_TARGET;
+    var ranges = _blockedRanges(text);
+
+    function emit(end) {
+        var piece = text.substring(start, end);
+        start = end;
+        if (piece.replace(/\s+/g, "").length > 0) {
+            chunks.push(piece);
+            minLen = STREAM_CHUNK_TARGET;
+        }
+    }
+
+    function inlineOpenAt(pos) {
+        var para = text.lastIndexOf("\n\n", pos - 1);
+        var paraStart = Math.max(start, para >= 0 ? para + 2 : 0);
+        return _inlineOpen(text.substring(paraStart, pos));
+    }
+
+    var re = /[.!?…]+["'”’)\]*_]*(?=\s)|\n+/g;
+    re.lastIndex = start;
+    var m;
+    while ((m = re.exec(text)) !== null) {
+        var b = m.index + m[0].length;
+        if (_isBlocked(ranges, b))
+            continue;
+        // A blank line always ends inline markup; anything else is checked.
+        if (m[0].indexOf("\n\n") < 0 && inlineOpenAt(b))
+            continue;
+        if (b - start >= minLen)
+            emit(b);
+    }
+
+    // No sentence end for a long stretch: cut at the last comma or space.
+    while (!isFinal && text.length - start > STREAM_CHUNK_MAX) {
+        var span = text.substring(start, start + STREAM_CHUNK_MAX);
+        var cut = span.lastIndexOf(", ");
+        cut = cut > 0 ? cut + 2 : span.lastIndexOf(" ") + 1;
+        if (cut <= 0 || _isBlocked(ranges, start + cut) || inlineOpenAt(start + cut))
+            break;
+        emit(start + cut);
+    }
+
+    if (isFinal && start < text.length)
+        emit(text.length);
+
+    return { chunks: chunks, offset: start };
+}
+
+/**
+ * Speak a reply chunk by chunk while it is still being written.
+ *
+ * Endpoint backends (synthesize + play commands) synthesize up to two chunks
+ * ahead and play strictly in order; single-command backends (spd-say, CLI)
+ * run one chunk after another.
+ *
+ * @param {object} opts
+ * @param {object} opts.config
+ * @param {string} [opts.apiKey]
+ * @param {function} opts.runCommand   function(cmd, callback, onReady)
+ * @param {function} [opts.isCancelled]
+ * @param {function} [opts.onReady]    first audio is about to play (or the queue ended)
+ * @param {function} [opts.onDone]     function(err, info) after the last chunk, or the first error;
+ *                                     info is set when the server could not be reached (see _failure)
+ * @param {function} [opts.onIdle]     everything pushed so far has played (more may come)
+ * @param {function} [opts.onBusy]     a chunk was pushed after the queue went idle
+ * @returns {{push: function(text, [styleHint]), finish: function, cancel: function}}
+ */
+function createSpeechQueue(opts) {
+    opts = opts || {};
+    var conn = getTtsConnection(opts.config);
+    var adapter = conn ? TtsAdapters.get(conn.backend) : null;
+    var items = [];
+    var playIdx = 0;
+    var playing = false;
+    var finished = false;
+    var done = false;
+    var onReady = opts.onReady || null;
+    var AHEAD = 2;
+    var idle = true;
+    var runSeq = 0;
+
+    function notifyReady() {
+        if (typeof onReady === "function") {
+            var f = onReady;
+            onReady = null;
+            try { f(); } catch (e) {}
+        }
+    }
+
+    function end(err, info) {
+        if (done)
+            return;
+        done = true;
+        notifyReady();
+        if (typeof opts.onDone === "function")
+            opts.onDone(err || null, info || null);
+    }
+
+    function cancelled() {
+        return typeof opts.isCancelled === "function" && opts.isCancelled();
+    }
+
+    function resultFailure(proc) {
+        return _failure(adapter, conn, proc);
+    }
+
+    function startSynth(it) {
+        it.state = "synth";
+        opts.runCommand(it.cmd.synthesizeCmd, function(err, proc) {
+            if (done)
+                return;
+            var f = err ? { err: err, info: null } : resultFailure(proc);
+            if (f) {
+                end(f.err, f.info);
+                return;
+            }
+            it.state = "ready";
+            pump();
+        }, function() {});
+    }
+
+    function startPlay(it) {
+        playing = true;
+        it.state = "play";
+        notifyReady();
+        // Single commands get a unique no-op prefix: the command text is the
+        // runner's key, and the same sentence twice must not collide.
+        var playCmd = it.twoPhase ? it.cmd.playCmd
+            : ": plasmallm_tts_run_" + (++runSeq) + "_" + Date.now().toString(36) + "; " + it.cmd;
+        opts.runCommand(playCmd, function(err, proc) {
+            playing = false;
+            if (done)
+                return;
+            var f = err ? { err: err, info: null } : (it.twoPhase ? null : resultFailure(proc));
+            if (f) {
+                end(f.err, f.info);
+                return;
+            }
+            playIdx++;
+            pump();
+        }, function() {});
+    }
+
+    function pump() {
+        if (done)
+            return;
+        if (cancelled()) {
+            done = true;
+            notifyReady();
+            return;
+        }
+        if (!playing && playIdx < items.length) {
+            var next = items[playIdx];
+            if (next.twoPhase ? next.state === "ready" : next.state === "new")
+                startPlay(next);
+        }
+        // AHEAD chunks prepared beyond the one playing.
+        var limit = playIdx + AHEAD + (playing ? 1 : 0);
+        for (var i = playIdx; i < items.length && i < limit; i++) {
+            if (items[i].twoPhase && items[i].state === "new")
+                startSynth(items[i]);
+        }
+        if (!playing && playIdx >= items.length) {
+            if (finished) {
+                end(null);
+            } else if (!idle) {
+                idle = true;
+                if (typeof opts.onIdle === "function")
+                    opts.onIdle();
+            }
+        }
+    }
+
+    return {
+        push: function(text, styleHint) {
+            if (done || finished)
+                return;
+            if (!conn || !adapter || !isTtsConfigured(opts.config)) {
+                end(notConfiguredMessage(opts.config));
+                return;
+            }
+            if (typeof opts.runCommand !== "function") {
+                end(_i18n("TTS command runner is not available"));
+                return;
+            }
+            var prepared = prepareTextForSpeech(text,
+                styleHint !== undefined && styleHint !== null ? styleHint : conn.styleHint);
+            if (!prepared.length)
+                return;
+            var cmd;
+            try {
+                cmd = buildSpeechCommand(adapter, conn, prepared, opts.apiKey);
+            } catch (buildErr) {
+                end(buildErr.message || String(buildErr));
+                return;
+            }
+            if (!cmd || !cmd.length) {
+                end(_i18n("Could not build TTS command"));
+                return;
+            }
+            items.push({
+                cmd: cmd,
+                twoPhase: !!(cmd.synthesizeCmd && cmd.playCmd),
+                state: "new"
+            });
+            if (idle) {
+                idle = false;
+                if (typeof opts.onBusy === "function")
+                    opts.onBusy();
+            }
+            pump();
+        },
+        finish: function() {
+            finished = true;
+            pump();
+        },
+        cancel: function() {
+            done = true;
+        }
+    };
+}
+
+/**
  * Speak text using the configured TTS backend.
  *
  * @param {object} opts
@@ -275,7 +689,9 @@ function buildStopCommand(backendId) {
  * @param {string} opts.text
  * @param {string} [opts.apiKey]
  * @param {function} opts.runCommand  function(cmd, callback)
- * @param {function} opts.callback    function(err, result)
+ * @param {function} opts.callback    function(err, result); on a failure result is
+ *                                    null, or {unreachable, backend, endpoint} when
+ *                                    the server could not be reached (see _failure)
  */
 function speak(opts) {
     var callback = (opts && opts.callback) || function() {};
@@ -292,7 +708,7 @@ function speak(opts) {
 
     if (!conn || !isTtsConfigured(config)) {
         notifyReady();
-        callback(_i18n("Text-to-speech is not configured"), null);
+        callback(notConfiguredMessage(config), null);
         return;
     }
 
@@ -318,20 +734,7 @@ function speak(opts) {
 
     var cmd;
     try {
-        cmd = adapter.buildCommand({
-            text: preparedText,
-            endpoint: conn.endpoint,
-            apiKey: opts.apiKey || "",
-            model: conn.model,
-            voice: conn.voice,
-            responseFormat: conn.responseFormat,
-            rate: conn.rate,
-            pitch: conn.pitch,
-            language: conn.language,
-            cliBinary: conn.cliBinary,
-            cliTemplate: conn.cliTemplate,
-            extraArgs: conn.cliExtraArgs
-        });
+        cmd = buildSpeechCommand(adapter, conn, preparedText, opts.apiKey);
     } catch (buildErr) {
         notifyReady();
         callback(buildErr.message || String(buildErr), null);
@@ -352,14 +755,11 @@ function speak(opts) {
                 callback(synErr, null);
                 return;
             }
-            synProc = synProc || {};
-            if (typeof adapter.parseResult === "function") {
-                var synParsed = adapter.parseResult(synProc.stdout, synProc.stderr, synProc.exitCode);
-                if (synParsed && synParsed.err) {
-                    notifyReady();
-                    callback(synParsed.err, null);
-                    return;
-                }
+            var synFailure = _failure(adapter, conn, synProc);
+            if (synFailure) {
+                notifyReady();
+                callback(synFailure.err, synFailure.info);
+                return;
             }
 
             if (typeof opts.isCancelled === "function" && opts.isCancelled()) {
@@ -389,14 +789,11 @@ function speak(opts) {
             callback(runErr, null);
             return;
         }
-        proc = proc || {};
-        if (typeof adapter.parseResult === "function") {
-            var parsed = adapter.parseResult(proc.stdout, proc.stderr, proc.exitCode);
-            if (parsed && parsed.err) {
-                notifyReady();
-                callback(parsed.err, null);
-                return;
-            }
+        var failure = _failure(adapter, conn, proc);
+        if (failure) {
+            notifyReady();
+            callback(failure.err, failure.info);
+            return;
         }
         notifyReady();
         callback(null, { success: true });

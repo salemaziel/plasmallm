@@ -4,6 +4,7 @@
 */
 
 .import "sttAdapters/index.js" as SttAdapters
+.import "sttAdapters/whisperSetup.js" as WhisperSetup
 
 function getSttConnection(config) {
     if (!config)
@@ -178,11 +179,16 @@ function backendChoices() {
     return SttAdapters.list();
 }
 
-function whisperCacheCheckCommand(model) {
+function whisperCacheCheckCommand(model, cliBinary) {
     var adapter = SttAdapters.get("whisper_cli");
     if (!adapter || typeof adapter.buildCacheCheckCommand !== "function")
         return "";
-    return adapter.buildCacheCheckCommand(model);
+    return adapter.buildCacheCheckCommand(model, cliBinary);
+}
+
+function whisperIsCt2(cliBinary) {
+    var adapter = SttAdapters.get("whisper_cli");
+    return !!(adapter && typeof adapter.isCt2Binary === "function" && adapter.isCt2Binary(cliBinary));
 }
 
 function whisperDownloadSizeHint(model) {
@@ -218,6 +224,31 @@ function whisperCppHelpCommand(cppBinary) {
     if (!adapter || typeof adapter.buildHelpCommand !== "function")
         return "";
     return adapter.buildHelpCommand(cppBinary);
+}
+
+// Local Whisper setup (detection, recommendation, install script).
+function whisperProbeCommand(cppBinary, cliBinary, cppModel, marker) {
+    return WhisperSetup.buildProbeCommand(cppBinary, cliBinary, cppModel, marker);
+}
+
+function whisperParseProbe(stdout) {
+    return WhisperSetup.parseProbe(stdout);
+}
+
+function whisperRecommend(probe, opts) {
+    return WhisperSetup.recommend(probe, opts);
+}
+
+function whisperInstallScript(kind, flavor, probe, opts) {
+    return WhisperSetup.buildInstallScript(kind, flavor, probe, opts);
+}
+
+function whisperLaunchCommand(script, marker) {
+    return WhisperSetup.buildLaunchCommand(script, marker);
+}
+
+function whisperUpdateDeclined(current, addIds, removeIds) {
+    return WhisperSetup.updateDeclined(current, addIds, removeIds);
 }
 
 function providerPresets() {

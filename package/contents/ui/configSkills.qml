@@ -135,7 +135,7 @@ BaseConfigPage {
             var d = Skills.toLocalPath(extraDirs[i]).trim();
             if (d.length > 0) roots.push({ dir: d, source: "custom" });
         }
-        return roots;
+        return Skills.dedupeRoots(roots);
     }
 
     function refreshSkills() {
@@ -184,12 +184,12 @@ BaseConfigPage {
     }
 
     Kirigami.FormLayout {
-        width: Math.min(parent.width, Kirigami.Units.gridUnit * 32)
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 32
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.CheckBox {
@@ -209,7 +209,7 @@ BaseConfigPage {
                 font: Kirigami.Theme.smallFont
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+                Layout.maximumWidth: textMaxWidth
             }
 
             Kirigami.Separator {
@@ -222,7 +222,7 @@ BaseConfigPage {
                 color: Kirigami.Theme.disabledTextColor
                 wrapMode: Text.WordWrap
                 Layout.fillWidth: true
-                Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+                Layout.maximumWidth: textMaxWidth
             }
 
             Repeater {
@@ -231,7 +231,7 @@ BaseConfigPage {
                 delegate: RowLayout {
                     readonly property var skill: skillsList[index]
                     Layout.fillWidth: true
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+                    Layout.maximumWidth: textMaxWidth
                     spacing: Kirigami.Units.smallSpacing
 
                     QQC2.Switch {
@@ -340,7 +340,7 @@ BaseConfigPage {
 
                 delegate: RowLayout {
                     Layout.fillWidth: true
-                    Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+                    Layout.maximumWidth: textMaxWidth
                     spacing: Kirigami.Units.smallSpacing
 
                     QQC2.Label {
@@ -410,7 +410,7 @@ BaseConfigPage {
             color: Kirigami.Theme.disabledTextColor
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            Layout.maximumWidth: textMaxWidth
         }
     }
 }

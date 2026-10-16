@@ -7,7 +7,7 @@
 // Host (main.qml) executes the command via the Plasma executable engine.
 
 var id = "whisper_cli";
-var displayName = "OpenAI Whisper (local CLI)";
+var displayName = "OpenAI Whisper — Python (local)";
 var transport = "cli";
 
 var KNOWN_MODELS = [
@@ -72,7 +72,40 @@ function downloadSizeHint(model) {
     return SIZE_HINTS[trimStr(model)] || "";
 }
 
-function buildCacheCheckCommand(model) {
+// whisper-ctranslate2 (faster-whisper) takes the same command line as the
+// OpenAI program apart from a few flags, so it runs through this backend.
+var CT2_NAME = "whisper-ctranslate2";
+
+/** True when the command prefix runs whisper-ctranslate2 rather than openai-whisper. */
+function isCt2Binary(cliBinary) {
+    var parts = trimStr(cliBinary).split(/\s+/);
+    var last = parts[parts.length - 1] || "";
+    return /(^|\/)whisper-ctranslate2$/i.test(last) || /^whisper_ctranslate2$/i.test(last);
+}
+
+// whisper-ctranslate2 has no plain "large"; it means large-v3 in openai-whisper.
+function ct2ModelName(model) {
+    return model === "large" ? "large-v3" : model;
+}
+
+// CTranslate2 compute type per device: int8 is fastest on a CPU. On a GPU
+// ct2's own "auto" is left to choose: it picks float16 where the card has
+// it, and an explicit float16 is refused below compute capability 7.0
+// (GTX 10-series and older), see https://opennmt.net/CTranslate2/quantization.html
+function ct2ComputeType(device) {
+    if (device === "cpu")
+        return "int8";
+    return "";
+}
+
+/**
+ * Command that prints DOWNLOADED or MISSING for the openai-whisper model
+ * cache. Empty for whisper-ctranslate2, which keeps its models in the
+ * Hugging Face cache under different names.
+ */
+function buildCacheCheckCommand(model, cliBinary) {
+    if (isCt2Binary(cliBinary))
+        return "";
     var file = cacheFileName(model);
     if (!file.length || !/^[A-Za-z0-9._-]+\.pt$/.test(file))
         return "";
@@ -90,14 +123,15 @@ function pythonLauncherFromPrefix(cliBinary) {
     var p = trimStr(cliBinary) || defaultPrefix();
     var parts = p.split(/\s+/);
     var n = parts.length;
-    if (n >= 3 && /^python3?$/.test(parts[n - 3])
+    // "<python> -m whisper": that python, including a full path such as
+    // /opt/venv/bin/python or python3.12.
+    if (n >= 3 && /(^|\/)python(\d+(\.\d+)?)?$/.test(parts[n - 3])
             && parts[n - 2] === "-m"
-            && /whisper$/i.test(parts[n - 1])) {
-        parts = parts.slice(0, n - 3);
-        parts.push("python3");
+            && /whisper(_ctranslate2)?$/i.test(parts[n - 1])) {
+        parts = parts.slice(0, n - 2);
         return parts.filter(function(t) { return t.length > 0; }).join(" ") || "python3";
     }
-    if (n >= 1 && /(^|\/)whisper$/i.test(parts[n - 1])) {
+    if (n >= 1 && /(^|\/)whisper(-ctranslate2)?$/i.test(parts[n - 1])) {
         parts = parts.slice(0, n - 1);
         parts.push("python3");
         return parts.filter(function(t) { return t.length > 0; }).join(" ") || "python3";
@@ -107,6 +141,8 @@ function pythonLauncherFromPrefix(cliBinary) {
 
 function buildCudaCheckCommand(cliBinary) {
     var launcher = pythonLauncherFromPrefix(cliBinary);
+    if (isCt2Binary(cliBinary))
+        return launcher + " -c 'import sys; sys.stdout.write(\"1\" if __import__(\"ctranslate2\").get_cuda_device_count() > 0 else \"0\")'";
     return launcher + " -c 'import sys; sys.stdout.write(\"1\" if __import__(\"torch\").cuda.is_available() else \"0\")'";
 }
 
@@ -187,6 +223,7 @@ function buildCommand(opts) {
         throw new Error(i18n("Invalid Whisper model id"));
 
     var prefix = trimStr(opts.cliBinary) || defaultPrefix();
+    var ct2 = isCt2Binary(prefix);
     var outDir = dirnameOf(filePath);
     var txtPath = sidecarTxt(filePath);
 
@@ -194,7 +231,7 @@ function buildCommand(opts) {
     parts.push(prefix);
     parts.push(shellQuote(filePath));
     parts.push("--model");
-    parts.push(model);
+    parts.push(ct2 ? ct2ModelName(model) : model);
     parts.push("--output_format");
     parts.push("txt");
     parts.push("--output_dir");
@@ -224,8 +261,17 @@ function buildCommand(opts) {
         parts.push(device);
     }
 
-    parts.push("--fp16");
-    parts.push(opts.cliFp16 ? "True" : "False");
+    // whisper-ctranslate2 has no --fp16; it sets precision with --compute_type.
+    if (ct2) {
+        var computeType = ct2ComputeType(device);
+        if (computeType.length) {
+            parts.push("--compute_type");
+            parts.push(computeType);
+        }
+    } else {
+        parts.push("--fp16");
+        parts.push(opts.cliFp16 ? "True" : "False");
+    }
 
     var threads = parseInt(opts.cliThreads, 10);
     if (!isNaN(threads) && threads > 0) {
@@ -243,6 +289,12 @@ function buildCommand(opts) {
     if (extra.length)
         parts.push(extra);
 
+    // whisper-ctranslate2 prints the error and still exits 0 when a file
+    // fails, so a missing transcript has to count as the failure.
+    if (ct2)
+        return parts.join(" ") + " 1>/dev/null && { [ -f " + shellQuote(txtPath) + " ] || { echo "
+            + shellQuote(i18n("whisper-ctranslate2 wrote no transcript; its error is above.")) + " >&2; exit 1; }; cat "
+            + shellQuote(txtPath) + "; }";
     return parts.join(" ") + " 1>/dev/null && cat " + shellQuote(txtPath);
 }
 

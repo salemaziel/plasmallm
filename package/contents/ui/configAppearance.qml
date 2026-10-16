@@ -37,6 +37,8 @@ BaseConfigPage {
     }
 
     Kirigami.FormLayout {
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
         QQC2.CheckBox {
             Kirigami.FormData.label: i18n("Profile Header:")
             text: i18n("Show provider and model in profile header")

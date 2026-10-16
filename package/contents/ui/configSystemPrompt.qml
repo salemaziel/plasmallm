@@ -75,7 +75,7 @@ BaseConfigPage {
         QQC2.TextArea {
             id: editorArea
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             Layout.minimumHeight: Kirigami.Units.gridUnit * 4
             wrapMode: Text.Wrap
             font.family: "monospace"
@@ -302,6 +302,8 @@ BaseConfigPage {
     // Wrapping labels and text boxes get a small Layout.preferredWidth and
     // fill the width, so the form never grows wider than the window.
     Kirigami.FormLayout {
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
 
         // --- The template ---------------------------------------------------
 
@@ -312,7 +314,8 @@ BaseConfigPage {
 
         QQC2.Label {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             wrapMode: Text.Wrap
             text: i18n("This is the system prompt sent at the start of every message. Write anything you like. Each {{tag}} is swapped for a section the widget builds; the list below says what each one adds, when, and whether it is in your prompt now.")
         }
@@ -321,7 +324,7 @@ BaseConfigPage {
             id: systemPromptArea
             Kirigami.FormData.label: i18n("System prompt:")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             Layout.minimumHeight: Kirigami.Units.gridUnit * 12
             placeholderText: i18n("Write your system prompt here…")
             wrapMode: Text.Wrap
@@ -358,8 +361,13 @@ BaseConfigPage {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.largeSpacing
+
+            // Every tag button takes the widest one's width, so the
+            // descriptions next to them start in one straight column.
+            id: sectionList
+            property real tagButtonWidth: 0
 
             Repeater {
                 model: configPage.sectionRows
@@ -372,6 +380,9 @@ BaseConfigPage {
 
                     QQC2.Button {
                         Layout.alignment: Qt.AlignTop
+                        Layout.preferredWidth: Math.max(implicitWidth, sectionList.tagButtonWidth)
+                        onImplicitWidthChanged: sectionList.tagButtonWidth = Math.max(sectionList.tagButtonWidth, implicitWidth)
+                        Component.onCompleted: sectionList.tagButtonWidth = Math.max(sectionList.tagButtonWidth, implicitWidth)
                         text: "{{" + modelData.tag + "}}"
                         QQC2.ToolTip.text: i18n("Insert this tag at the cursor")
                         QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
@@ -461,7 +472,7 @@ BaseConfigPage {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.CheckBox {
@@ -478,7 +489,7 @@ BaseConfigPage {
             QQC2.TextArea {
                 id: accuracyArea
                 Layout.fillWidth: true
-                Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+                Layout.maximumWidth: textMaxWidth
                 Layout.minimumHeight: Kirigami.Units.gridUnit * 6
                 enabled: cfg_accuracyInstructionsEnabled
                 wrapMode: Text.Wrap
@@ -530,7 +541,7 @@ BaseConfigPage {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.largeSpacing
 
             QQC2.Label {
@@ -624,7 +635,7 @@ BaseConfigPage {
             Kirigami.FormData.label: i18n("Localization:")
             visible: !Qt.locale().name.toLowerCase().startsWith("en")
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.CheckBox {
@@ -659,7 +670,8 @@ BaseConfigPage {
 
         QQC2.Label {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             wrapMode: Text.Wrap
             font: Kirigami.Theme.smallFont
             color: Kirigami.Theme.disabledTextColor
@@ -668,7 +680,7 @@ BaseConfigPage {
 
         QQC2.TextArea {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             Layout.minimumHeight: Kirigami.Units.gridUnit * 14
             readOnly: true
             wrapMode: Text.Wrap

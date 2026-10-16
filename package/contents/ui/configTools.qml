@@ -316,6 +316,8 @@ BaseConfigPage {
     }
 
     Kirigami.FormLayout {
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
         Kirigami.Separator {
             Kirigami.FormData.isSection: true
             Kirigami.FormData.label: i18n("General Tool Settings")
@@ -368,7 +370,7 @@ BaseConfigPage {
 
             QQC2.Label {
                 id: enableDesktopAutomationLabel
-                text: configPage.driverDetected ? i18n("Enable Desktop Automation") : i18n("Enable Desktop Automation (requires <a href=\"https://github.com/joshuaeroman/plasmallm-desktop-driver\">driver</a>)")
+                text: configPage.driverDetected ? i18n("Enable Desktop Automation") : i18n("Enable Desktop Automation (requires <a href=\"https://github.com/salemaziel/plasmallm-desktop-driver\">driver</a>)")
                 textFormat: Text.RichText
                 opacity: cfg_enableTools ? 1.0 : 0.6
                 onLinkActivated: function(link) {
@@ -397,7 +399,7 @@ BaseConfigPage {
             // asks for its whole sentence on one line and the form runs off
             // the right edge of the window.
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
 
             function removeAt(idx) {
                 var arr = whitelistPaths.slice();
@@ -524,7 +526,7 @@ BaseConfigPage {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
         }
 
         Kirigami.Separator {
@@ -585,7 +587,7 @@ BaseConfigPage {
 
         ColumnLayout {
             Layout.fillWidth: true
-            Layout.preferredWidth: Kirigami.Units.gridUnit * 26
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.largeSpacing
             enabled: cfg_enableTools
             opacity: enabled ? 1.0 : 0.6
@@ -600,8 +602,10 @@ BaseConfigPage {
 
                 readonly property var toolMetadata: ToolManager.getToolMetadata(toolName, null)
 
+                padding: Kirigami.Units.largeSpacing
+
                 contentItem: ColumnLayout {
-                    spacing: Kirigami.Units.smallSpacing
+                    spacing: Kirigami.Units.mediumSpacing
 
                     RowLayout {
                         Layout.fillWidth: true

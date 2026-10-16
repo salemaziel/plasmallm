@@ -417,6 +417,23 @@ function stubDeliveredSkillResults(messages, activeNames) {
  * @returns {Array} parsed skill records; duplicate names keep the first
  *   (highest-priority) occurrence and later ones are marked invalid.
  */
+// Drops a root that names a folder already in the list (ignoring trailing
+// slashes), keeping the first, higher-priority one. Without this, adding the
+// built-in skills folder again as an extra folder scanned every skill twice
+// and flagged each second copy as a duplicate name.
+function dedupeRoots(roots) {
+    var out = [];
+    var seen = {};
+    var list = Array.isArray(roots) ? roots : [];
+    for (var i = 0; i < list.length; i++) {
+        var dir = String(list[i].dir || "").replace(/\/+$/, "");
+        if (!dir || seen[dir]) continue;
+        seen[dir] = true;
+        out.push({ dir: dir, source: list[i].source });
+    }
+    return out;
+}
+
 function parseScanOutput(stdout, roots) {
     var MARK = "===PLASMALLM_SKILL ";
     var SCRIPT_MARK = "===PLASMALLM_SKILL_SCRIPT ";

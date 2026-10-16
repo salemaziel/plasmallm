@@ -52,6 +52,17 @@ test:
 	node tests/utils.mjs
 	node tests/tts.mjs
 	node tests/whisper_cpp.mjs
+	node tests/whisper_setup.mjs
+	node tests/whisper_unchanged.mjs
+	node tests/kokoro_setup.mjs
+	node tests/kokoro_mix.mjs
+	node tests/kokoro_starting.mjs
+	node tests/kokoro_starting_tools.mjs
+	node tests/connect_retry.mjs
+	node tests/tts_empty_audio.mjs
+	node tests/stt_upload.mjs
+	node tests/voice_profiles.mjs
+	node tests/pragma_i18n.mjs
 
 # Translations
 translations: check-translations $(MO_FILES)

@@ -11,7 +11,7 @@ Thanks for your interest in contributing to PlasmaLLM! This document covers guid
 
 There is no build step, test suite, or linter for dev mode. QML is interpreted at runtime.
 
-> **Note:** Run `make remove` before switching back to a release version from [GitHub](https://github.com/joshuaeroman/plasmallm/releases) or the [KDE Store](https://store.kde.org/p/2348409/) to remove the development symlink.
+> **Note:** Run `make remove` before switching back to a release version from [GitHub](https://github.com/salemaziel/plasmallm/releases) or the [KDE Store](https://store.kde.org/p/2348409/) to remove the development symlink.
 
 ## Submitting Changes
 

@@ -4,19 +4,30 @@
 */
 
 import QtQuick
+import org.kde.kirigami as Kirigami
 import org.kde.kcmutils
 import "profiles.js" as Profiles
+import "voiceProfiles.js" as VoiceProfiles
 
 SimpleKCM {
     id: basePage
-    
+
     readonly property var rootItem: basePage
+
+    // Shared page layout: the top-level FormLayout on every config page is
+    // centered, grows with the window up to pageMaxWidth, and wrapped text and
+    // full-width blocks cap at textMaxWidth so they wrap at the same width.
+    readonly property real pageMaxWidth: Kirigami.Units.gridUnit * 32
+    readonly property real textMaxWidth: Kirigami.Units.gridUnit * 28
 
     // Declared here because Plasma injects all cfg_ properties onto every config page.
     // By centralizing them in this base component, we avoid duplication and console warnings.
 
     property bool _switchingProfile: false
     property bool _initialized: false
+    // True while a voice profile is being put on a speech page: the page's
+    // change handlers wait, and the page refreshes itself once afterwards.
+    property bool _applyingVoiceProfile: false
 
     // Config transaction: multi-field writes set _configTxnDepth > 0 so
     // onCfg_* handlers skip side effects (wallet/models/capture). endConfigTxn
@@ -25,7 +36,28 @@ SimpleKCM {
     property int _configGen: 0
     readonly property bool inConfigTxn: _configTxnDepth > 0
 
+    // The Defaults button writes each setting's built-in default (empty here)
+    // over the saved voice profiles, and Apply would then delete them all. Every
+    // page carries these two settings, so the guard lives here: a wipe is put
+    // back to the last saved value (voiceProfiles.js decides what counts).
+    property string _keptVoiceProfiles: ""
+    property string _keptActiveVoiceProfileId: ""
+    onCfg_voiceProfilesChanged: {
+        var kept = VoiceProfiles.keepSavedProfiles(_keptVoiceProfiles, cfg_voiceProfiles);
+        _keptVoiceProfiles = kept;
+        if (kept !== cfg_voiceProfiles)
+            cfg_voiceProfiles = kept;
+    }
+    onCfg_activeVoiceProfileIdChanged: {
+        var kept = VoiceProfiles.keepActiveProfileId(_keptActiveVoiceProfileId, cfg_activeVoiceProfileId);
+        _keptActiveVoiceProfileId = kept;
+        if (kept !== cfg_activeVoiceProfileId)
+            cfg_activeVoiceProfileId = kept;
+    }
+
     Component.onCompleted: {
+        _keptVoiceProfiles = cfg_voiceProfiles;
+        _keptActiveVoiceProfileId = cfg_activeVoiceProfileId;
         // Use a timer to ensure all child components have finished their own onCompleted
         // and any initial bindings have settled.
         Qt.callLater(() => {
@@ -323,6 +355,8 @@ SimpleKCM {
     property string cfg_sttCppBinaryDefault
     property string cfg_sttCppModelDirs
     property string cfg_sttCppModelDirsDefault
+    property string cfg_sttSetupDeclined
+    property string cfg_sttSetupDeclinedDefault
     property string cfg_sttLanguage
     property string cfg_sttLanguageDefault
     property int cfg_sttMaxSeconds
@@ -346,6 +380,8 @@ SimpleKCM {
     property bool cfg_ttsAutoReadOnlyVoicePromptedDefault
     property bool cfg_ttsWaitUntilReady
     property bool cfg_ttsWaitUntilReadyDefault
+    property bool cfg_ttsStreamSpeech
+    property bool cfg_ttsStreamSpeechDefault
     property string cfg_ttsStyleHint
     property string cfg_ttsStyleHintDefault
     property bool cfg_ttsAllowAgentStyleControl
@@ -380,6 +416,28 @@ SimpleKCM {
     property string cfg_sttModelPricesDefault
     property string cfg_ttsAvailableVoices
     property string cfg_ttsAvailableVoicesDefault
+    property int cfg_ttsSpeedPercent
+    property int cfg_ttsSpeedPercentDefault
+    property string cfg_ttsInstructions
+    property string cfg_ttsInstructionsDefault
+    property string cfg_ttsKokoroUrl
+    property string cfg_ttsKokoroUrlDefault
+    property string cfg_ttsKokoroVoice
+    property string cfg_ttsKokoroVoiceDefault
+    property string cfg_ttsKokoroMixes
+    property string cfg_ttsKokoroMixesDefault
+    property string cfg_ttsKokoroFormat
+    property string cfg_ttsKokoroFormatDefault
+    property int cfg_ttsKokoroVolumePercent
+    property int cfg_ttsKokoroVolumePercentDefault
+    property string cfg_ttsKokoroLangCode
+    property string cfg_ttsKokoroLangCodeDefault
+    property string cfg_ttsSetupDeclined
+    property string cfg_ttsSetupDeclinedDefault
+    property string cfg_voiceProfiles
+    property string cfg_voiceProfilesDefault
+    property string cfg_activeVoiceProfileId
+    property string cfg_activeVoiceProfileIdDefault
     property bool cfg_useCommandTool
     property bool cfg_useCommandToolDefault
     property bool cfg_commandValidatorEnabled

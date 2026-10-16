@@ -848,6 +848,8 @@ BaseConfigPage {
     }
 
     Kirigami.FormLayout {
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
         RowLayout {
             Kirigami.FormData.label: i18n("Profile:")
             Layout.fillWidth: true
@@ -1210,7 +1212,7 @@ BaseConfigPage {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
         }
 
         RowLayout {
@@ -1256,7 +1258,7 @@ BaseConfigPage {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
         }
 
         Kirigami.Separator {
@@ -1351,7 +1353,7 @@ BaseConfigPage {
         QQC2.Label {
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
             text: caps.reasoningHelp ? i18n(caps.reasoningHelp) : ""
             wrapMode: Text.WordWrap
             opacity: 0.7
@@ -1411,7 +1413,7 @@ BaseConfigPage {
         QQC2.Label {
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
             text: i18n("OpenRouter attribution lets OpenRouter see that you used PlasmaLLM to access their API. Nothing about your conversations is shared.")
             visible: isOpenRouterSelected
             wrapMode: Text.WordWrap
@@ -1503,7 +1505,7 @@ BaseConfigPage {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: textMaxWidth
         }
 
         QQC2.ButtonGroup { id: autoClearGroup }

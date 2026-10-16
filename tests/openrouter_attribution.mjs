@@ -38,7 +38,7 @@ function i18n() {
     return s;
 }
 
-const REFERRER = "https://github.com/joshuaeroman/plasmallm";
+const REFERRER = "https://github.com/salemaziel/plasmallm";
 const APP_TITLE = "PlasmaLLM";
 
 function loadStrategy(file) {

@@ -23,8 +23,11 @@ BaseConfigPage {
     }
 
     Kirigami.FormLayout {
+        width: Math.min(parent.width, pageMaxWidth)
+        Layout.maximumWidth: pageMaxWidth
         ColumnLayout {
             Layout.fillWidth: true
+            Layout.maximumWidth: textMaxWidth
             spacing: Kirigami.Units.smallSpacing
 
             QQC2.Label {
@@ -198,7 +201,8 @@ BaseConfigPage {
             color: Kirigami.Theme.disabledTextColor
             wrapMode: Text.Wrap
             Layout.fillWidth: true
-            Layout.preferredWidth: 300
+            Layout.preferredWidth: 1
+            Layout.maximumWidth: textMaxWidth
             Layout.topMargin: Kirigami.Units.largeSpacing
         }
     }

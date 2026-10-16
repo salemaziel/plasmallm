@@ -31,7 +31,7 @@ ColumnLayout {
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+        Layout.maximumWidth: configPage.textMaxWidth
         color: Kirigami.Theme.negativeTextColor
         font: Kirigami.Theme.smallFont
     }
@@ -41,7 +41,7 @@ ColumnLayout {
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+        Layout.maximumWidth: configPage.textMaxWidth
         color: Kirigami.Theme.disabledTextColor
         font: Kirigami.Theme.smallFont
     }
@@ -58,6 +58,11 @@ ColumnLayout {
     QQC2.CheckBox {
         id: useSessionMultiplexerCheckBox
         text: i18n("Run commands inside a persistent session")
+        // Without a width limit the checkbox keeps its text on one line and
+        // stretches the whole tool card past the page edge; this lets it wrap.
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        Layout.maximumWidth: configPage.textMaxWidth
         checked: cfg_useSessionMultiplexer
         onCheckedChanged: if (_initialized) cfg_useSessionMultiplexer = checked
         enabled: configPage.hasTmux || configPage.hasScreen
@@ -145,6 +150,11 @@ ColumnLayout {
     QQC2.CheckBox {
         id: validatorCheckBox
         text: i18n("Validate commands against their justification with a second model")
+        // Without a width limit the checkbox keeps its text on one line and
+        // stretches the whole tool card past the page edge; this lets it wrap.
+        Layout.fillWidth: true
+        Layout.preferredWidth: 1
+        Layout.maximumWidth: configPage.textMaxWidth
         checked: cfg_commandValidatorEnabled
         onCheckedChanged: if (_initialized) cfg_commandValidatorEnabled = checked
 
@@ -159,7 +169,7 @@ ColumnLayout {
         wrapMode: Text.Wrap
         Layout.fillWidth: true
         Layout.preferredWidth: 1
-        Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+        Layout.maximumWidth: configPage.textMaxWidth
         color: Kirigami.Theme.disabledTextColor
         font: Kirigami.Theme.smallFont
     }
@@ -258,7 +268,7 @@ ColumnLayout {
             wrapMode: Text.Wrap
             Layout.fillWidth: true
             Layout.preferredWidth: 1
-            Layout.maximumWidth: Kirigami.Units.gridUnit * 24
+            Layout.maximumWidth: configPage.textMaxWidth
             font: Kirigami.Theme.smallFont
         }
 

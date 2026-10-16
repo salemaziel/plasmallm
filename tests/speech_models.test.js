@@ -43,7 +43,7 @@ function loadSpeech(routes, seen) {
     this.responseText = r ? JSON.stringify(r) : '';
     this.onreadystatechange();
   };
-  return new Function('Utils', 'XMLHttpRequest', src + '\nreturn { fetchModels, buildCommand, defaultKnownModels };')(Utils, XHR);
+  return new Function('Utils', 'SpeechRules', 'XMLHttpRequest', src + '\nreturn { fetchModels, buildCommand, defaultKnownModels };')(Utils, load('ttsAdapters/speechRules.js'), XHR);
 }
 
 console.log('\nTTS fetchModels');

@@ -18,6 +18,8 @@ import "api.js" as Api
 import "wallet.js" as Wallet
 import "walletCore.js" as WalletCore
 import "stt.js" as Stt
+import "fallbacks.js" as Fallbacks
+import "voiceProfiles.js" as VoiceProfiles
 import "utils.js" as Utils
 import "profiles.js" as Profiles
 import "usage.js" as Usage
@@ -44,6 +46,14 @@ BaseConfigPage {
     property int _cudaGen: 0
     property bool cppScanInProgress: false
     property int _cppScanGen: 0
+    // Local Whisper setup: probe result, and the install running in a terminal.
+    property var setupProbe: null
+    property bool setupProbeInProgress: false
+    property int _setupGen: 0
+    property int _setupRunGen: 0
+    property bool setupRunning: false
+    property double _setupRunStarted: 0
+    property string setupRunStatus: ""
 
     readonly property var sttPresets: Stt.providerPresets()
     readonly property var sttBackends: Stt.backendChoices()
@@ -52,6 +62,21 @@ BaseConfigPage {
     readonly property bool isCliBackend: (cfg_sttBackend || "") === "whisper_cli"
     readonly property bool isCppBackend: (cfg_sttBackend || "") === "whisper_cpp"
     readonly property bool isLocalBackend: isCliBackend || isCppBackend
+    // whisper-ctranslate2 (faster-whisper) runs through the Python backend.
+    readonly property bool isCt2Cli: isCliBackend && Stt.whisperIsCt2(cfg_sttCliBinary)
+    readonly property var setupRec: setupProbe ? Stt.whisperRecommend(setupProbe, {
+        declined: cfg_sttSetupDeclined,
+        cppDevice: cfg_sttCliDevice,
+        cliBinary: cfg_sttCliBinary,
+        cliDevice: cfg_sttCliDevice,
+        cliModel: cfg_sttModelName
+    }) : null
+    readonly property var setupCur: setupRec ? (isCppBackend ? setupRec.whisper_cpp : (isCliBackend ? setupRec.whisper_cli : null)) : null
+    readonly property var setupOpenOffers: setupCur ? setupCur.offers.filter(function(o) { return !o.declined; }) : []
+    readonly property var setupDeclinedOffers: setupCur ? setupCur.offers.filter(function(o) { return o.declined; }) : []
+    // Offers and the "Use it" suggestion the user chose to keep away from.
+    readonly property var setupDeclinedIds: setupDeclinedOffers.map(function(o) { return o.id; })
+        .concat(setupCur && setupCur.useBinary && setupCur.useBinary.declined ? [setupCur.useBinary.id] : [])
     // OpenRouter attribution applies to STT only through the HTTP
     // transcriptions adapter; whisper_cli is local and never attributes.
     readonly property bool sttOpenRouterSelected: (cfg_sttBackend || "openai_transcriptions") === "openai_transcriptions" &&
@@ -137,9 +162,79 @@ BaseConfigPage {
                 cfg_sttModelName = pick;
             }
             syncModelCombo();
-            statusLabel.text = i18n("Found %1 whisper.cpp model(s).", availableModels.length);
-            statusLabel.visible = true;
+            modelStatusLabel.text = i18n("whisper.cpp models found in the model folders: %1", availableModels.length);
+            modelStatusLabel.visible = true;
         }
+    }
+
+    // The probe command starts with ": plasmallm-whisper-probe-<gen>", so a
+    // result is matched to its own run, not to whichever started last.
+    P5Support.DataSource {
+        id: whisperProbe
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            var exitCode = data["exit code"];
+            if (exitCode === undefined)
+                return;
+            disconnectSource(source);
+            var m = /^: plasmallm-whisper-probe-(\d+)/.exec(source);
+            if (!m || parseInt(m[1], 10) !== configPage._setupGen)
+                return;
+            setupProbeWatchdog.stop();
+            setupProbeInProgress = false;
+            setupProbe = Stt.whisperParseProbe(data.stdout || "");
+            applyProbeCudaStatus();
+        }
+    }
+
+    // A probe that never returns (a hung GPU tool beyond its timeout)
+    // would otherwise keep every setup button disabled.
+    Timer {
+        id: setupProbeWatchdog
+        interval: 150000
+        onTriggered: {
+            if (!setupProbeInProgress)
+                return;
+            ++_setupGen;
+            whisperProbe.connectedSources.slice().forEach(function(s) { whisperProbe.disconnectSource(s); });
+            setupProbeInProgress = false;
+            setupRunStatus = i18n("Checking took too long and was stopped. Press Check again to retry.");
+        }
+    }
+
+    P5Support.DataSource {
+        id: whisperSetupRunner
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            var exitCode = data["exit code"];
+            if (exitCode === undefined)
+                return;
+            disconnectSource(source);
+            setupRunning = false;
+            var quick = Date.now() - _setupRunStarted < 5000;
+            var failed = exitCode !== 0 && exitCode !== "0";
+            // A quick failure is the terminal not starting (missing, or no
+            // -e option); after a real run the script's own window showed
+            // the result.
+            if (quick && failed)
+                setupRunStatus = i18n("The setup terminal could not be started: %1",
+                    String(data.stderr || "").replace(/^\s+|\s+$/g, "") || i18n("exit %1", exitCode));
+            // Some terminals hand the window to a running instance and
+            // return at once; the script is then still going.
+            else if (quick)
+                setupRunStatus = i18n("If the setup terminal is still open, press Check again when it has finished.");
+            else
+                setupRunStatus = "";
+            runSetupProbe();
+        }
+    }
+
+    Timer {
+        id: setupProbeDebounce
+        interval: 800
+        onTriggered: runSetupProbe()
     }
 
     P5Support.DataSource {
@@ -154,19 +249,19 @@ BaseConfigPage {
             cliTestInProgress = false;
             var stderr = (data.stderr || "").replace(/^\s+|\s+$/g, "");
             var stdout = (data.stdout || "").replace(/^\s+|\s+$/g, "");
+            var result;
             if (exitCode === 0) {
-                statusLabel.text = i18n("Whisper CLI responded to --help.");
+                result = i18n("Whisper CLI responded to --help.");
             } else {
                 var detail = stderr || stdout || "";
                 if (detail.length > 240)
                     detail = detail.substring(0, 240);
                 if (detail.length)
-                    statusLabel.text = i18n("Whisper CLI test failed (exit %1): %2", exitCode, detail);
+                    result = i18n("Whisper CLI test failed (exit %1): %2", exitCode, detail);
                 else
-                    statusLabel.text = i18n("Whisper CLI test failed (exit %1). Check the command.", exitCode);
+                    result = i18n("Whisper CLI test failed (exit %1). Check the command.", exitCode);
             }
-            cliTestStatus = statusLabel.text;
-            statusLabel.visible = true;
+            cliTestStatus = result;
         }
     }
 
@@ -229,12 +324,12 @@ BaseConfigPage {
             if (res && res.success) {
                 cfg_apiKeysFallback = WalletCore.stringifyFallbackMap(
                     WalletCore.removeFallback(readFallbackMap(), slot));
-                statusLabel.text = i18n("API key saved to KWallet.");
+                apiKeyStatusLabel.text = i18n("API key saved to KWallet.");
             } else {
                 writeFallbackKey(slot, key);
-                statusLabel.text = i18n("API key saved to local fallback.");
+                apiKeyStatusLabel.text = i18n("API key saved to local fallback.");
             }
-            statusLabel.visible = true;
+            apiKeyStatusLabel.visible = true;
         });
     }
 
@@ -325,7 +420,11 @@ BaseConfigPage {
             cliCacheStatus = "";
             return;
         }
-        var cmd = Stt.whisperCacheCheckCommand(id);
+        if (Stt.whisperIsCt2(cfg_sttCliBinary)) {
+            cliCacheStatus = i18n("whisper-ctranslate2 downloads the model into the Hugging Face cache (~/.cache/huggingface) the first time it is used.");
+            return;
+        }
+        var cmd = Stt.whisperCacheCheckCommand(id, cfg_sttCliBinary);
         if (!cmd || cmd.length === 0) {
             cliCacheStatus = "";
             return;
@@ -354,11 +453,185 @@ BaseConfigPage {
         whisperCudaCheck.connectSource(cmd);
     }
 
+    function runSetupProbe() {
+        if (!isLocalBackend)
+            return;
+        var myGen = ++_setupGen;
+        setupProbeInProgress = true;
+        setupProbeWatchdog.restart();
+        whisperProbe.connectSource(Stt.whisperProbeCommand(cfg_sttCppBinary, cfg_sttCliBinary,
+            isCppBackend ? cfg_sttModelName : "", myGen));
+    }
+
+    // The probe runs PyTorch/CTranslate2 from the program's own environment
+    // (and knows which GPUs a PyTorch has kernels for), so its answer
+    // replaces the older CUDA check's when it has one. Returns whether it did.
+    function applyProbeCudaStatus() {
+        if (!setupRec || !isCliBackend || (cfg_sttCliDevice || "") !== "cuda")
+            return false;
+        var rec = setupRec.whisper_cli;
+        if (!rec.cudaKnown)
+            return false;
+        ++_cudaGen;
+        cliCudaStatus = rec.cudaUsable
+            ? i18n("CUDA is available to Whisper.")
+            : i18n("CUDA is not available in this Whisper environment. Use cpu or Default.");
+        return true;
+    }
+
+    function runSetupOffer(offer) {
+        if (!offer || !setupProbe || setupRunning)
+            return;
+        var script = Stt.whisperInstallScript(offer.kind, offer.flavor, setupProbe, { cppModelDirs: cfg_sttCppModelDirs });
+        setupRunning = true;
+        _setupRunStarted = Date.now();
+        setupRunStatus = i18n("Setup is running in a terminal window.");
+        // The time keeps the command unique across settings dialogs; a
+        // repeated command string would attach to a still-running source.
+        whisperSetupRunner.connectSource(Stt.whisperLaunchCommand(script, Date.now() + "-" + (++_setupRunGen)));
+    }
+
+    // Declines are saved straight away, so closing Settings with Cancel
+    // doesn't bring a declined offer back. "Show options" undoes it the same way.
+    function saveSetupDeclined(value) {
+        cfg_sttSetupDeclined = value;
+        try {
+            if (typeof plasmoid !== "undefined" && plasmoid && plasmoid.configuration) {
+                plasmoid.configuration.sttSetupDeclined = value;
+                plasmoid.configuration.writeConfig();
+            }
+        } catch (e) {
+            console.warn("PlasmaLLM: could not save sttSetupDeclined: " + e);
+        }
+    }
+
+    function declineSetupOffer(offerId) {
+        saveSetupDeclined(Stt.whisperUpdateDeclined(cfg_sttSetupDeclined, [offerId], []));
+    }
+
+    function showSetupOptions() {
+        saveSetupDeclined(Stt.whisperUpdateDeclined(cfg_sttSetupDeclined, [], setupDeclinedIds));
+    }
+
+    function useSetupBinary(choice) {
+        if (!choice)
+            return;
+        if (isCppBackend)
+            cfg_sttCppBinary = choice.path;
+        else
+            cfg_sttCliBinary = choice.path;
+        if (choice.device && choice.device.length)
+            cfg_sttCliDevice = choice.device;
+        runSetupProbe();
+    }
+
+    // The settings on this page as the plain object the speech code reads.
+    function sttConfigSnapshot() {
+        return {
+            sttEnabled: !!cfg_sttEnabled,
+            sttBackend: cfg_sttBackend || "openai_transcriptions",
+            sttFallbacks: cfg_sttFallbacks || "[]",
+            sttBackendModels: cfg_sttBackendModels || "{}",
+            sttProviderName: cfg_sttProviderName || "",
+            sttApiEndpoint: cfg_sttApiEndpoint || "",
+            sttModelName: cfg_sttModelName || "",
+            sttLanguage: cfg_sttLanguage || "",
+            sttCliBinary: cfg_sttCliBinary || "whisper",
+            sttCliTask: cfg_sttCliTask || "transcribe",
+            sttCliDevice: cfg_sttCliDevice || "",
+            sttCliFp16: !!cfg_sttCliFp16,
+            sttCliThreads: cfg_sttCliThreads || 0,
+            sttCliInitialPrompt: cfg_sttCliInitialPrompt || "",
+            sttCliExtraArgs: cfg_sttCliExtraArgs || "",
+            sttCppBinary: cfg_sttCppBinary || "whisper-cli",
+            sttCppModelDirs: cfg_sttCppModelDirs || ""
+        };
+    }
+
+    // The Fallbacks list: which backends are set up, and which can be added.
+    readonly property var fallbackRowList: Stt.fallbackRows(sttConfigSnapshot(), { "openai_transcriptions": walletApiKey })
+    readonly property var fallbackChoiceList: Stt.fallbackChoices(sttConfigSnapshot())
+
+    // sttModelName holds only the main backend's model; this remembers the
+    // model chosen for each backend so a fallback has its own.
+    function recordBackendModel() {
+        if (!_initialized || _applyingVoiceProfile)
+            return;
+        var next = VoiceProfiles.recordBackendModel(cfg_sttBackendModels, cfg_sttBackend || "openai_transcriptions", cfg_sttModelName);
+        if (next !== cfg_sttBackendModels)
+            cfg_sttBackendModels = next;
+    }
+
+    // The main backend is never in its own fallback list.
+    function cleanFallbacks() {
+        var clean = Fallbacks.serialize(Fallbacks.parseList(cfg_sttFallbacks, cfg_sttBackend || "openai_transcriptions", Stt.knownBackendIds()));
+        if (clean !== cfg_sttFallbacks)
+            cfg_sttFallbacks = clean;
+    }
+
+    // Called by the voice profile bar before it reads this page's values.
+    function beforeVoiceProfileCapture() {
+        recordBackendModel();
+    }
+
+    // The voice profile bar replaced the settings on this page: refresh the
+    // boxes the way opening the page does.
+    function afterVoiceProfileApplied() {
+        cliCacheStatus = "";
+        cliCudaStatus = "";
+        if (isCliBackend) {
+            applyCliModelList();
+        } else if (isCppBackend) {
+            scanCppModels();
+        } else {
+            loadModelCache();
+        }
+        syncProviderCombo();
+        syncBackendCombo();
+        loadWalletKey();
+        syncModelCombo();
+        if (isCliBackend)
+            checkWhisperCuda();
+        runSetupProbe();
+    }
+
+    // Keep the active voice profile's copy current. Plasma writes the page's
+    // values to the config before it calls saveConfig(), so a change made only
+    // there would miss the save; instead this runs shortly after every edit.
+    function syncVoiceProfile() {
+        if (!_initialized || _applyingVoiceProfile)
+            return;
+        cleanFallbacks();
+        recordBackendModel();
+        if (voiceProfileBar)
+            voiceProfileBar.saveActiveProfile();
+    }
+
+    readonly property string voiceValuesKey: VoiceProfiles.valuesKey(configPage)
+    onVoiceValuesKeyChanged: {
+        if (_initialized && !_applyingVoiceProfile)
+            voiceProfileSyncTimer.restart();
+    }
+
+    Timer {
+        id: voiceProfileSyncTimer
+        interval: 250
+        repeat: false
+        onTriggered: configPage.syncVoiceProfile()
+    }
+
+    // Apply/OK: a last catch-up for an edit made in the final moments.
+    function saveConfig() {
+        voiceProfileSyncTimer.stop();
+        syncVoiceProfile();
+    }
+
     function applyBackend(index) {
         if (!_initialized) return;
         var choice = sttBackends[index];
         if (!choice) return;
         cfg_sttBackend = choice.id;
+        cleanFallbacks();
         if (choice.id === "whisper_cli") {
             if (!cfg_sttCliBinary || cfg_sttCliBinary.length === 0)
                 cfg_sttCliBinary = "whisper";
@@ -386,9 +659,7 @@ BaseConfigPage {
             cmd = prefix + " --help";
         }
         cliTestInProgress = true;
-        statusLabel.text = isCppBackend ? i18n("Testing whisper.cpp…") : i18n("Testing Whisper CLI…");
-        cliTestStatus = statusLabel.text;
-        statusLabel.visible = true;
+        cliTestStatus = isCppBackend ? i18n("Testing whisper.cpp…") : i18n("Testing Whisper CLI…");
         whisperTest.connectSource(cmd);
     }
 
@@ -401,25 +672,25 @@ BaseConfigPage {
         }
         if (isCliBackend) {
             applyCliModelList();
-            statusLabel.text = i18n("Loaded %1 STT model(s).", availableModels.length);
-            statusLabel.visible = true;
+            modelStatusLabel.text = i18n("Speech-to-text models loaded: %1", availableModels.length);
+            modelStatusLabel.visible = true;
             return;
         }
         var endpoint = (cfg_sttApiEndpoint || "").replace(/\/+$/, "");
         if (!endpoint) {
-            statusLabel.text = i18n("Set an API endpoint first.");
-            statusLabel.visible = true;
+            modelStatusLabel.text = i18n("Set an API endpoint first.");
+            modelStatusLabel.visible = true;
             return;
         }
         fetchInProgress = true;
-        statusLabel.text = i18n("Fetching STT models…");
-        statusLabel.visible = true;
+        modelStatusLabel.text = i18n("Fetching STT models…");
+        modelStatusLabel.visible = true;
         var key = walletApiKey || (apiKeyField ? apiKeyField.text : "") || "";
         Stt.fetchModels(endpoint, key, cfg_sttBackend || "openai_transcriptions", function(err, models, status, prices) {
             fetchInProgress = false;
             if (err) {
-                statusLabel.text = err;
-                statusLabel.visible = true;
+                modelStatusLabel.text = err;
+                modelStatusLabel.visible = true;
                 return;
             }
             availableModels = models || [];
@@ -431,8 +702,8 @@ BaseConfigPage {
                 cfg_sttModelName = availableModels[0];
             }
             syncModelCombo();
-            statusLabel.text = i18n("Loaded %1 STT model(s).", availableModels.length);
-            statusLabel.visible = true;
+            modelStatusLabel.text = i18n("Speech-to-text models loaded: %1", availableModels.length);
+            modelStatusLabel.visible = true;
         });
     }
 
@@ -512,11 +783,14 @@ BaseConfigPage {
             _initialized = true;
             if (isCliBackend)
                 checkWhisperCuda();
+            runSetupProbe();
         });
     }
 
+    // While a voice profile is being put on the page these wait; the page
+    // refreshes once afterwards (afterVoiceProfileApplied).
     onCfg_sttBackendChanged: {
-        if (!_initialized) return;
+        if (!_initialized || _applyingVoiceProfile) return;
         syncBackendCombo();
         if (isCliBackend) {
             applyCliModelList();
@@ -529,29 +803,50 @@ BaseConfigPage {
             cliCacheStatus = "";
             cliCudaStatus = "";
         }
+        runSetupProbe();
     }
-    onCfg_sttCliBinaryChanged: if (_initialized && isCliBackend) checkWhisperCuda()
-    onCfg_sttCliDeviceChanged: if (_initialized) checkWhisperCuda()
-    onCfg_sttProviderNameChanged: if (_initialized) syncProviderCombo()
+    onCfg_sttCliBinaryChanged: {
+        if (!_initialized || _applyingVoiceProfile || !isCliBackend) return;
+        checkWhisperCuda();
+        checkWhisperCache(cfg_sttModelName);
+        setupProbeDebounce.restart();
+    }
+    onCfg_sttCppBinaryChanged: if (_initialized && !_applyingVoiceProfile && isCppBackend) setupProbeDebounce.restart()
+    // The probe's answer knows the program's own environment; the older
+    // check guesses the python, so it runs only without a probe result.
+    onCfg_sttCliDeviceChanged: if (_initialized && !_applyingVoiceProfile && !applyProbeCudaStatus()) checkWhisperCuda()
+    onCfg_sttProviderNameChanged: if (_initialized && !_applyingVoiceProfile) syncProviderCombo()
     onCfg_sttApiEndpointChanged: {
-        if (!_initialized) return;
+        if (!_initialized || _applyingVoiceProfile) return;
         // Reload key for new slot when endpoint identity changes
         loadWalletKey();
     }
     onCfg_sttModelNameChanged: {
-        if (_initialized) {
+        if (_initialized && !_applyingVoiceProfile) {
             syncModelCombo();
+            recordBackendModel();
             if (isCliBackend)
                 checkWhisperCache(cfg_sttModelName);
+            // whisper.cpp's memory check needs the model file's size.
+            if (isCppBackend)
+                setupProbeDebounce.restart();
         }
     }
-    onCfg_sttAvailableModelsChanged: if (_initialized) loadModelCache()
+    onCfg_sttAvailableModelsChanged: if (_initialized && !_applyingVoiceProfile) loadModelCache()
 
     Kirigami.FormLayout {
         // Prefer shrink-to-fit inside the Plasma config dialog; long combo
         // model strings must not force the window wider than the shell allows.
         width: Math.min(parent.width, Kirigami.Units.gridUnit * 32)
         Layout.maximumWidth: Kirigami.Units.gridUnit * 32
+
+        VoiceProfileBar {
+            id: voiceProfileBar
+            Kirigami.FormData.label: i18n("Voice profile:")
+            Layout.fillWidth: true
+            page: configPage
+            onApplied: configPage.afterVoiceProfileApplied()
+        }
 
         QQC2.CheckBox {
             id: enableCheck
@@ -646,6 +941,185 @@ BaseConfigPage {
             }
         }
 
+        FallbackList {
+            Kirigami.FormData.label: i18n("Fallbacks:")
+            Layout.fillWidth: true
+            listJson: cfg_sttFallbacks || "[]"
+            mainId: cfg_sttBackend || "openai_transcriptions"
+            knownIds: Stt.knownBackendIds()
+            rows: fallbackRowList
+            choices: fallbackChoiceList
+            purpose: i18n("If transcribing fails with the backend above, or finds no speech, the same recording is sent to these, in order. Each one uses the settings saved for it on this page. A backend that isn't set up is skipped.")
+            onListChanged: function(json) {
+                cfg_sttFallbacks = json;
+            }
+        }
+
+        // The two local entries run the same Whisper models through different
+        // programs, so say which one to pick.
+        QQC2.Label {
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            opacity: 0.7
+            text: isCppBackend
+                ? i18n("Runs Whisper on this computer with whisper.cpp, a C++ rewrite. Usually several times faster than the Python version on a CPU and lighter on memory. Uses ggml-*.bin model files. The best local choice without a strong NVIDIA GPU.")
+                : isCliBackend
+                ? i18n("Runs Whisper on this computer with OpenAI's original Python program (pip install openai-whisper). Slow on a CPU and reloads the model every time; worth it mainly with a CUDA GPU. whisper.cpp runs the same models faster on most machines.")
+                : i18n("Sends the recording to a speech-to-text service (Groq, OpenAI, OpenRouter, or a local server). Fastest option, but audio leaves this computer. For offline use, pick one of the local backends.")
+        }
+
+        // What is installed, whether it suits this computer, and offers to
+        // install or build the right one (whisperSetup.js decides; this
+        // only shows it). Every offer can be declined and stays declined.
+        ColumnLayout {
+            id: setupBlock
+            visible: isLocalBackend
+            Kirigami.FormData.label: i18n("Setup:")
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            spacing: Kirigami.Units.smallSpacing
+
+            // Plain text: these carry GPU names and Python error lines.
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                font: Kirigami.Theme.smallFont
+                text: setupCur ? setupCur.message
+                    : (setupProbeInProgress ? i18n("Checking what is installed…") : "")
+                visible: text.length > 0
+            }
+
+            QQC2.Label {
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+                textFormat: Text.PlainText
+                font: Kirigami.Theme.smallFont
+                color: Kirigami.Theme.neutralTextColor
+                text: setupCur ? setupCur.warnings.join("\n") : ""
+                visible: text.length > 0
+            }
+
+            RowLayout {
+                visible: !!(setupCur && setupCur.useBinary && !setupCur.useBinary.declined)
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                    font: Kirigami.Theme.smallFont
+                    text: setupCur && setupCur.useBinary ? setupCur.useBinary.message : ""
+                }
+
+                QQC2.Button {
+                    text: i18n("Use it")
+                    icon.name: "dialog-ok-apply"
+                    onClicked: useSetupBinary(setupCur.useBinary)
+                }
+
+                QQC2.Button {
+                    text: i18n("Keep current setup")
+                    flat: true
+                    onClicked: declineSetupOffer(setupCur.useBinary.id)
+                }
+            }
+
+            Repeater {
+                model: setupOpenOffers
+
+                delegate: ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: Kirigami.Units.smallSpacing
+
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        textFormat: Text.PlainText
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.85
+                        text: modelData.reason
+                    }
+
+                    QQC2.Label {
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                        font: Kirigami.Theme.smallFont
+                        opacity: 0.85
+                        visible: modelData.missing.length > 0
+                        text: modelData.packageCommand.length > 0
+                            ? i18n("Needs packages; the terminal shows this command and asks before running it: %1", modelData.packageCommand)
+                            : i18n("Needs %1. Install it with your package manager first.", modelData.missing.join(", "))
+                    }
+
+                    RowLayout {
+                        spacing: Kirigami.Units.smallSpacing
+
+                        QQC2.Button {
+                            text: modelData.label
+                            icon.name: modelData.kind === "whisper_cpp" ? "run-build" : "download"
+                            highlighted: !modelData.optional
+                            enabled: !setupRunning && !setupProbeInProgress
+                            onClicked: runSetupOffer(modelData)
+                        }
+
+                        QQC2.Button {
+                            text: i18n("Keep current setup")
+                            flat: true
+                            onClicked: declineSetupOffer(modelData.id)
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                visible: setupDeclinedIds.length > 0
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    font: Kirigami.Theme.smallFont
+                    opacity: 0.7
+                    text: i18n("You chose to keep the current setup.")
+                }
+
+                QQC2.Button {
+                    text: i18n("Show options")
+                    flat: true
+                    onClicked: showSetupOptions()
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: Kirigami.Units.smallSpacing
+
+                QQC2.Button {
+                    text: i18n("Check again")
+                    icon.name: "view-refresh"
+                    enabled: !setupProbeInProgress
+                    onClicked: {
+                        setupRunStatus = "";
+                        runSetupProbe();
+                    }
+                }
+
+                QQC2.Label {
+                    Layout.fillWidth: true
+                    wrapMode: Text.WordWrap
+                    textFormat: Text.PlainText
+                    font: Kirigami.Theme.smallFont
+                    text: setupProbeInProgress ? i18n("Checking…") : setupRunStatus
+                    visible: text.length > 0
+                }
+            }
+        }
+
         QQC2.ComboBox {
             id: providerCombo
             visible: !isLocalBackend
@@ -713,6 +1187,17 @@ BaseConfigPage {
             onFetchRequested: fetchModels()
         }
 
+        // Result of loading or scanning the model list, shown next to the picker.
+        QQC2.Label {
+            id: modelStatusLabel
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            visible: false
+            opacity: 0.9
+        }
+
         QQC2.Label {
             visible: isCliBackend && cliCacheStatus.length > 0
             Layout.fillWidth: true
@@ -762,6 +1247,16 @@ BaseConfigPage {
                 QQC2.ToolTip.delay: Kirigami.Units.toolTipDelay
                 QQC2.ToolTip.visible: hovered
             }
+        }
+
+        QQC2.Label {
+            id: apiKeyStatusLabel
+            Layout.fillWidth: true
+            Layout.maximumWidth: Kirigami.Units.gridUnit * 28
+            wrapMode: Text.WordWrap
+            font: Kirigami.Theme.smallFont
+            visible: false
+            opacity: 0.9
         }
 
         QQC2.TextField {
@@ -941,7 +1436,7 @@ BaseConfigPage {
 
         QQC2.CheckBox {
             id: cliFp16Check
-            visible: isCliBackend
+            visible: isCliBackend && !isCt2Cli
             Kirigami.FormData.label: i18n("FP16:")
             text: i18n("Use --fp16 True (GPU)")
             checked: cfg_sttCliFp16
@@ -1061,15 +1556,6 @@ BaseConfigPage {
                 if (!_initialized) return;
                 cfg_sttMaxSeconds = value;
             }
-        }
-
-        QQC2.Label {
-            id: statusLabel
-            Layout.fillWidth: true
-            wrapMode: Text.WordWrap
-            font: Kirigami.Theme.smallFont
-            visible: false
-            opacity: 0.9
         }
     }
 }

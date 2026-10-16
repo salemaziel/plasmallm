@@ -17,6 +17,9 @@ SimpleKCM {
 
     property bool _switchingProfile: false
     property bool _initialized: false
+    // True while a voice profile is being put on a speech page: the page's
+    // change handlers wait, and the page refreshes itself once afterwards.
+    property bool _applyingVoiceProfile: false
 
     // Config transaction: multi-field writes set _configTxnDepth > 0 so
     // onCfg_* handlers skip side effects (wallet/models/capture). endConfigTxn
@@ -323,6 +326,8 @@ SimpleKCM {
     property string cfg_sttCppBinaryDefault
     property string cfg_sttCppModelDirs
     property string cfg_sttCppModelDirsDefault
+    property string cfg_sttSetupDeclined
+    property string cfg_sttSetupDeclinedDefault
     property string cfg_sttLanguage
     property string cfg_sttLanguageDefault
     property int cfg_sttMaxSeconds
@@ -346,6 +351,8 @@ SimpleKCM {
     property bool cfg_ttsAutoReadOnlyVoicePromptedDefault
     property bool cfg_ttsWaitUntilReady
     property bool cfg_ttsWaitUntilReadyDefault
+    property bool cfg_ttsStreamSpeech
+    property bool cfg_ttsStreamSpeechDefault
     property string cfg_ttsStyleHint
     property string cfg_ttsStyleHintDefault
     property bool cfg_ttsAllowAgentStyleControl
@@ -380,6 +387,34 @@ SimpleKCM {
     property string cfg_sttModelPricesDefault
     property string cfg_ttsAvailableVoices
     property string cfg_ttsAvailableVoicesDefault
+    property int cfg_ttsSpeedPercent
+    property int cfg_ttsSpeedPercentDefault
+    property string cfg_ttsInstructions
+    property string cfg_ttsInstructionsDefault
+    property string cfg_ttsKokoroUrl
+    property string cfg_ttsKokoroUrlDefault
+    property string cfg_ttsKokoroVoice
+    property string cfg_ttsKokoroVoiceDefault
+    property string cfg_ttsKokoroMixes
+    property string cfg_ttsKokoroMixesDefault
+    property string cfg_ttsKokoroFormat
+    property string cfg_ttsKokoroFormatDefault
+    property int cfg_ttsKokoroVolumePercent
+    property int cfg_ttsKokoroVolumePercentDefault
+    property string cfg_ttsKokoroLangCode
+    property string cfg_ttsKokoroLangCodeDefault
+    property string cfg_ttsSetupDeclined
+    property string cfg_ttsSetupDeclinedDefault
+    property string cfg_ttsFallbacks
+    property string cfg_ttsFallbacksDefault
+    property string cfg_sttFallbacks
+    property string cfg_sttFallbacksDefault
+    property string cfg_sttBackendModels
+    property string cfg_sttBackendModelsDefault
+    property string cfg_voiceProfiles
+    property string cfg_voiceProfilesDefault
+    property string cfg_activeVoiceProfileId
+    property string cfg_activeVoiceProfileIdDefault
     property bool cfg_useCommandTool
     property bool cfg_useCommandToolDefault
     property bool cfg_commandValidatorEnabled

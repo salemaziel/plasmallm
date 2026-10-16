@@ -8,6 +8,7 @@
 // and OpenAI (tts-1, tts-1-hd with MP3), as well as custom endpoints.
 
 .import "../utils.js" as Utils
+.import "speechRules.js" as SpeechRules
 
 var id = "openai_speech";
 var displayName = "OpenRouter / OpenAI speech endpoint";
@@ -55,9 +56,26 @@ function defaultFormatForModel(model) {
  * @param {string} opts.apiKey
  * @param {string} opts.model
  * @param {string} opts.text
- * @param {string} [opts.voice]
- * @param {string} [opts.responseFormat]  pcm | mp3
+ * @param {string} [opts.voice]         SpeechRules.MODEL_DEFAULT_VOICE leaves
+ *                                      the voice field out of the request
+ * @param {string} [opts.responseFormat]  pcm | mp3; only honoured for models
+ *                                      known to send 24000 Hz PCM and under the
+ *                                      Custom preset, every other model is
+ *                                      asked for mp3
+ * @param {string} [opts.providerName]  the provider preset ("Custom" lets the
+ *                                      user's responseFormat through)
  * @param {string} [opts.tempDir]
+ * @param {number} [opts.speed]         0.25–4; sent only when not 1, since
+ *                                      some OpenRouter models reject any other
+ * @param {string} [opts.instructions]  how the voice should sound; never sent
+ *                                      to tts-1 / tts-1-hd, which reject it
+ * @param {object} [opts.extraFields]   merged into the request (Kokoro's
+ *                                      volume_multiplier, lang_code)
+ * @param {number} [opts.retries]       how many times to retry, one second
+ *                                      apart, to ride out a server restart;
+ *                                      only when the connection fails (curl
+ *                                      exit 7), never on HTTP errors; none
+ *                                      unless given
  * @returns {string} shell command
  */
 function buildCommand(opts) {
@@ -75,8 +93,9 @@ function buildCommand(opts) {
         throw new Error("TTS model is not configured");
 
     var url = endpoint + "/audio/speech";
+    var omitVoice = SpeechRules.isModelDefaultVoice(opts.voice);
     var voice = trimStr(opts.voice) || defaultVoiceForModel(model);
-    var format = trimStr(opts.responseFormat) || defaultFormatForModel(model);
+    var format = SpeechRules.resolveFormat(model, opts.responseFormat, defaultFormatForModel(model), opts.providerName);
     var apiKey = trimStr(opts.apiKey);
 
     var tempDir = opts.tempDir || "/tmp/plasmallm_tts";
@@ -92,20 +111,54 @@ function buildCommand(opts) {
         voice: voice,
         response_format: format
     };
+    // "Model default": the model picks its own voice. Some models reject any
+    // voice name that is not theirs, and an empty one.
+    if (omitVoice)
+        delete payload.voice;
+
+    var speed = Number(opts.speed);
+    if (isFinite(speed) && speed > 0) {
+        speed = Math.round(Math.max(0.25, Math.min(4, speed)) * 100) / 100;
+        if (speed !== 1)
+            payload.speed = speed;
+    }
+    var instructions = trimStr(opts.instructions);
+    if (instructions.length && !/^(openai\/)?tts-1(-hd)?$/i.test(model))
+        payload.instructions = instructions;
+    var extra = opts.extraFields || {};
+    for (var k in extra) {
+        if (Object.prototype.hasOwnProperty.call(extra, k))
+            payload[k] = extra[k];
+    }
 
     var payloadStr = JSON.stringify(payload);
+
+    // Opt-in: retry only when the connection itself fails (curl exit 7, a
+    // server that is restarting). curl's own --retry would also retry HTTP
+    // 408/429/5xx replies, which delays a real error by the whole retry window.
+    var retries = Math.floor(Number(opts.retries));
+    retries = (isFinite(retries) && retries > 0) ? Math.min(retries, 30) : 0;
+
+    var curlCall = "CODE=$(curl -s -X POST " + shellQuote(url)
+        + " -H 'Content-Type: application/json'"
+        + (apiKey.length ? (" -H 'Authorization: Bearer " + apiKey.replace(/'/g, "'\\''") + "'") : "")
+        + " -d @" + shellQuote(jsonFile)
+        + " -o " + shellQuote(audioFile)
+        + " -w '%{http_code}')";
 
     var scriptParts = [
         "mkdir -p " + shellQuote(tempDir),
         "printf '%s' " + shellQuote(payloadStr) + " > " + shellQuote(jsonFile),
-        "CODE=$(curl -s -X POST " + shellQuote(url)
-            + " -H 'Content-Type: application/json'"
-            + (apiKey.length ? (" -H 'Authorization: Bearer " + apiKey.replace(/'/g, "'\\''") + "'") : "")
-            + " -d @" + shellQuote(jsonFile)
-            + " -o " + shellQuote(audioFile)
-            + " -w '%{http_code}')",
+        retries > 0 ? withConnectRetry(curlCall, retries) : curlCall,
         'if [ "$CODE" -lt 200 ] || [ "$CODE" -ge 300 ]; then '
             + 'cat ' + shellQuote(audioFile) + ' 1>&2; '
+            + 'rm -f ' + shellQuote(jsonFile) + ' ' + shellQuote(audioFile) + '; '
+            + 'exit 1; '
+            + 'fi',
+        // A 200 reply with no audio in it is a failure too: without this the
+        // player runs on an empty file and the reply is silently lost.
+        'if [ ! -s ' + shellQuote(audioFile) + ' ]; then '
+            + "echo 'The speech server returned no audio.' 1>&2; "
             + 'rm -f ' + shellQuote(jsonFile) + ' ' + shellQuote(audioFile) + '; '
             + 'exit 1; '
             + 'fi'
@@ -138,6 +191,20 @@ function buildCommand(opts) {
     res.synthesizeCmd = synthCmd;
     res.playCmd = playCmd;
     return res;
+}
+
+/**
+ * Wrap a `CODE=$(curl ...)` assignment in a loop that runs it again, one
+ * second apart, up to `retries` more times, but only while curl exits 7
+ * (could not connect). Any other outcome ends the loop: success, an HTTP
+ * error reply (CODE then holds the status), or a different curl failure,
+ * which is passed on as the script's exit code like an unwrapped call.
+ */
+function withConnectRetry(curlCall, retries) {
+    return "{ TRY=0; while :; do " + curlCall + "; RC=$?; "
+        + "{ [ \"$RC\" -eq 7 ] && [ \"$TRY\" -lt " + retries + " ]; } || break; "
+        + "TRY=$((TRY+1)); sleep 1; done; "
+        + "[ \"$RC\" -eq 0 ] || exit \"$RC\"; }";
 }
 
 /**
@@ -207,7 +274,10 @@ function isSpeechModel(entry, id) {
  * used only when it reports no speech models (unreachable, or no /models).
  * `prices` maps model id to the endpoint's `pricing` object (OpenRouter).
  *
- * @param {function} callback function(err, models, voices, prices)
+ * `reported` (5th callback argument) is true when the models came from the
+ * endpoint and false when the built-in defaults were substituted.
+ *
+ * @param {function} callback function(err, models, voices, prices, reported)
  */
 function fetchModels(endpoint, apiKey, callback) {
     callback = callback || function() {};
@@ -282,6 +352,9 @@ function fetchModels(endpoint, apiKey, callback) {
         for (var i = 0; i < data.length; i++) {
             var id = typeof data[i] === "string" ? data[i] : (data[i] && data[i].id ? data[i].id : "");
             if (!id || !isSpeechModel(data[i], id)) continue;
+            // Kokoro-FastAPI also lists tts-1 / tts-1-hd: compatibility
+            // names for the same model. Only "kokoro" is shown.
+            if (data[i] && data[i].owned_by === "kokoro" && /^tts-1(-hd)?$/.test(id)) continue;
             if (found.indexOf(id) === -1)
                 found.push(id);
             if (data[i] && data[i].pricing && typeof data[i].pricing === "object")
@@ -295,7 +368,7 @@ function fetchModels(endpoint, apiKey, callback) {
             var sv = voiceNames(vjson && (Array.isArray(vjson) ? vjson : vjson.voices));
             if (sv.length > 0)
                 voices["*"] = sv;
-            callback(null, found.length > 0 ? found : defaultModels, voices, prices);
+            callback(null, found.length > 0 ? found : defaultModels, voices, prices, found.length > 0);
         });
     });
 }

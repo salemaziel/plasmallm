@@ -484,6 +484,10 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
       <label>Colon-separated folders scanned for whisper.cpp ggml-*.bin models</label>
       <default>~/.voicemode/models/whisper:~/.voicemode/services/whisper/models:~/.cache/openwhispr/whisper-models:~/.cache/whisper.cpp</default>
     </entry>
+    <entry name="sttSetupDeclined" type="String">
+      <label>Comma-separated local Whisper setup offers the user chose to skip (e.g. whisper_cpp:vulkan)</label>
+      <default></default>
+    </entry>
     <entry name="sttLanguage" type="String">
       <label>Optional ISO-639-1 language hint for STT (empty = auto-detect)</label>
       <default></default>
@@ -535,6 +539,10 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
     <entry name="ttsWaitUntilReady" type="Bool">
       <label>Don't output text until TTS is ready</label>
       <default>false</default>
+    </entry>
+    <entry name="ttsStreamSpeech" type="Bool">
+      <label>Start speaking while the reply is still being written</label>
+      <default>true</default>
     </entry>
     <entry name="ttsStyleHint" type="String">
       <label>Speech style, emotion, or tone hint (e.g. &lt;sarcastic&gt;, [whispering], or SSML)</label>
@@ -602,6 +610,66 @@ General-purpose assistant. Keep responses short (~1 paragraph) unless more detai
     </entry>
     <entry name="ttsAvailableVoices" type="String">
       <label>Cached TTS voices JSON object: model id to voice list, "*" for the whole server</label>
+      <default></default>
+    </entry>
+    <entry name="ttsSpeedPercent" type="Int">
+      <label>Speech speed in percent for the endpoint and Kokoro backends (100 = normal; sent as speed 0.25-4.0)</label>
+      <default>100</default>
+      <min>25</min>
+      <max>400</max>
+    </entry>
+    <entry name="ttsInstructions" type="String">
+      <label>How the voice should sound (instructions; gpt-4o-mini-tts, Gemini TTS, Fish Audio)</label>
+      <default></default>
+    </entry>
+    <entry name="ttsKokoroUrl" type="String">
+      <label>Kokoro (local) server URL, e.g. http://localhost:8880/v1; empty = not set up</label>
+      <default></default>
+    </entry>
+    <entry name="ttsKokoroVoice" type="String">
+      <label>Kokoro voice (voices can be mixed, e.g. af_heart+af_bella)</label>
+      <default>af_heart</default>
+    </entry>
+    <entry name="ttsKokoroMixes" type="String">
+      <label>Saved Kokoro voice mixes, as a JSON list of {name, voice}</label>
+      <default></default>
+    </entry>
+    <entry name="ttsKokoroFormat" type="String">
+      <label>Kokoro audio format (pcm, mp3)</label>
+      <default>pcm</default>
+    </entry>
+    <entry name="ttsKokoroVolumePercent" type="Int">
+      <label>Kokoro volume in percent (volume_multiplier; 100 = unchanged)</label>
+      <default>100</default>
+      <min>10</min>
+      <max>300</max>
+    </entry>
+    <entry name="ttsKokoroLangCode" type="String">
+      <label>Kokoro language code (a, b, e, f, h, i, j, p, z); empty = from the voice name</label>
+      <default></default>
+    </entry>
+    <entry name="ttsSetupDeclined" type="String">
+      <label>Comma-separated local Kokoro setup offers the user chose to skip (e.g. kokoro:install-cpu)</label>
+      <default></default>
+    </entry>
+    <entry name="ttsFallbacks" type="String">
+      <label>Text-to-speech backends tried, in order, when the main one fails (JSON array of backend ids)</label>
+      <default>[]</default>
+    </entry>
+    <entry name="sttFallbacks" type="String">
+      <label>Speech-to-text backends tried, in order, when the main one fails (JSON array of backend ids)</label>
+      <default>[]</default>
+    </entry>
+    <entry name="sttBackendModels" type="String">
+      <label>Speech-to-text model last chosen for each backend (JSON object of backend id to model)</label>
+      <default>{}</default>
+    </entry>
+    <entry name="voiceProfiles" type="String">
+      <label>Saved voice profiles: named sets of Speech to Text and Text to Speech settings (JSON array)</label>
+      <default></default>
+    </entry>
+    <entry name="activeVoiceProfileId" type="String">
+      <label>ID of the currently active voice profile</label>
       <default></default>
     </entry>
     <entry name="useCommandTool" type="Bool">

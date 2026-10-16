@@ -3,9 +3,9 @@
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
-// OpenAI-compatible / OpenRouter speech-to-text via POST /audio/transcriptions
-// using JSON body with base64 input_audio (OpenRouter STT shape; also works
-// with other gateways that accept the same wire format).
+// OpenAI-compatible / OpenRouter speech-to-text via POST /audio/transcriptions.
+// OpenRouter takes a JSON body with base64 input_audio; every other host
+// (OpenAI, Groq, local whisper servers) takes the standard multipart upload.
 
 .import "../utils.js" as Utils
 
@@ -26,8 +26,8 @@ function isConfigured(conn) {
 // OpenRouter app attribution (see applyOpenRouterAttribution in utils.js for
 // the explicit-true opt-out rule). Model listing calls setHeaders without
 // opts and stays unattributed.
-function setHeaders(xhr, apiKey, endpoint, opts) {
-    xhr.setRequestHeader("Content-Type", "application/json");
+function setHeaders(xhr, apiKey, endpoint, opts, contentType) {
+    xhr.setRequestHeader("Content-Type", contentType || "application/json");
     if (apiKey && apiKey.length > 0) {
         xhr.setRequestHeader("Authorization", "Bearer " + apiKey);
     }
@@ -68,6 +68,65 @@ function parseModelPricing(responseText) {
         }
     } catch (e) {}
     return out;
+}
+
+// OpenRouter is the only host known to want the JSON input_audio body.
+function usesJsonBody(endpoint) {
+    var h = hostOf(endpoint);
+    return h === "openrouter.ai" || /\.openrouter\.ai$/.test(h);
+}
+
+var _B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+function base64ToBytes(b64) {
+    var clean = String(b64 || "").replace(/[^A-Za-z0-9+/]/g, "");
+    var out = new Uint8Array(Math.floor(clean.length * 3 / 4));
+    var o = 0, buf = 0, bits = 0;
+    for (var i = 0; i < clean.length; i++) {
+        buf = (buf << 6) | _B64.indexOf(clean.charAt(i));
+        bits += 6;
+        if (bits >= 8) {
+            bits -= 8;
+            out[o++] = (buf >> bits) & 0xff;
+        }
+    }
+    return o === out.length ? out : out.subarray(0, o);
+}
+
+function _asciiBytes(str) {
+    var out = new Uint8Array(str.length);
+    for (var i = 0; i < str.length; i++)
+        out[i] = str.charCodeAt(i) & 0xff;
+    return out;
+}
+
+var _AUDIO_MIME = { wav: "audio/wav", mp3: "audio/mpeg", ogg: "audio/ogg", webm: "audio/webm",
+    m4a: "audio/mp4", flac: "audio/flac" };
+
+// multipart/form-data body for /audio/transcriptions. fields is a flat
+// { name: value } map; the audio goes in the "file" part.
+// Returns { contentType, body: Uint8Array }.
+function buildMultipartBody(fields, audioBytes, format, boundary) {
+    var fmt = format || "wav";
+    boundary = boundary || ("plasmallm" + Date.now().toString(16) + Math.floor(Math.random() * 1e9).toString(16));
+    var head = "";
+    for (var name in fields) {
+        if (fields[name] === undefined || fields[name] === null || fields[name] === "")
+            continue;
+        head += "--" + boundary + "\r\n"
+            + "Content-Disposition: form-data; name=\"" + name + "\"\r\n\r\n"
+            + String(fields[name]) + "\r\n";
+    }
+    head += "--" + boundary + "\r\n"
+        + "Content-Disposition: form-data; name=\"file\"; filename=\"audio." + fmt + "\"\r\n"
+        + "Content-Type: " + (_AUDIO_MIME[fmt] || "application/octet-stream") + "\r\n\r\n";
+    var tail = "\r\n--" + boundary + "--\r\n";
+    var a = _asciiBytes(head), c = _asciiBytes(tail);
+    var body = new Uint8Array(a.length + audioBytes.length + c.length);
+    body.set(a, 0);
+    body.set(audioBytes, a.length);
+    body.set(c, a.length + audioBytes.length);
+    return { contentType: "multipart/form-data; boundary=" + boundary, body: body };
 }
 
 function knownOpenAiSttModels() {
@@ -197,17 +256,26 @@ function transcribe(opts) {
     var url = endpoint + "/audio/transcriptions";
     xhr.open("POST", url);
     xhr.timeout = 90000;
-    setHeaders(xhr, opts.apiKey, endpoint, opts);
-
-    var body = {
-        model: opts.model,
-        input_audio: {
-            data: opts.audioBase64,
-            format: opts.format || "wav"
-        }
-    };
-    if (opts.language && String(opts.language).trim().length > 0) {
-        body.language = String(opts.language).trim();
+    var language = (opts.language && String(opts.language).trim().length > 0)
+        ? String(opts.language).trim() : "";
+    var payload;
+    if (usesJsonBody(endpoint)) {
+        setHeaders(xhr, opts.apiKey, endpoint, opts);
+        var body = {
+            model: opts.model,
+            input_audio: {
+                data: opts.audioBase64,
+                format: opts.format || "wav"
+            }
+        };
+        if (language)
+            body.language = language;
+        payload = JSON.stringify(body);
+    } else {
+        var mp = buildMultipartBody({ model: opts.model, language: language, response_format: "json" },
+            base64ToBytes(opts.audioBase64), opts.format || "wav");
+        setHeaders(xhr, opts.apiKey, endpoint, opts, mp.contentType);
+        payload = mp.body.buffer;
     }
 
     xhr.ontimeout = function() {
@@ -248,7 +316,7 @@ function transcribe(opts) {
     };
 
     try {
-        xhr.send(JSON.stringify(body));
+        xhr.send(payload);
     } catch (sendErr) {
         callback(i18n("STT request failed: %1", sendErr.message || String(sendErr)), null);
     }

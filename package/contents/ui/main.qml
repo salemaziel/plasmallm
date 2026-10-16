@@ -22,6 +22,7 @@ import "toolManager.js" as ToolManager
 import "driverManager.js" as DriverManager
 import "stt.js" as Stt
 import "tts.js" as Tts
+import "ttsAdapters/kokoroSetup.js" as KokoroSetup
 import "contextCompactor.js" as ContextCompactor
 import "commandValidator.js" as CommandValidator
 import "legacyChatLoader.js" as LegacyChatLoader
@@ -100,6 +101,7 @@ PlasmoidItem {
         var _be = Plasmoid.configuration.ttsBackend;
         var _ep = Plasmoid.configuration.ttsApiEndpoint;
         var _m = Plasmoid.configuration.ttsModelName;
+        var _ku = Plasmoid.configuration.ttsKokoroUrl;
         return Tts.isTtsConfigured(Plasmoid.configuration);
     }
     // One-time post-migration banner (not a chat message — clearChat dismisses it).
@@ -450,14 +452,18 @@ PlasmoidItem {
         root.appendDisplayMessage("error", message, { shared: false });
     }
 
+    // One short line saying which backend a reply or recording used when it
+    // was not the main one. Shown in the chat, never sent to the model.
+    function showSpeechNote(message) {
+        if (message && String(message).length > 0)
+            root.appendDisplayMessage("assistant", message, { shared: false });
+    }
+
     /**
-     * Load API key for the dedicated STT connection (Speech to Text page).
+     * Read the key saved for the STT endpoint (provider + URL), whatever the
+     * main backend is. Used for the main backend and for fallbacks.
      */
-    function loadSttApiKey(callback) {
-        if (!Stt.isSttConfigured(Plasmoid.configuration)) {
-            callback(i18n("Speech-to-text is not configured"), "");
-            return;
-        }
+    function readSttEndpointKey(callback) {
         var provider = Plasmoid.configuration.sttProviderName || "";
         var endpoint = Plasmoid.configuration.sttApiEndpoint || "";
         var slot = Api.sttKeySlot(provider, endpoint);
@@ -466,24 +472,16 @@ PlasmoidItem {
             function(res) {
                 if (res && res.available)
                     root.walletAvailable = true;
-                callback(null, (res && res.key) || fallbackKeyForSlot(slot) || "");
+                callback((res && res.key) || fallbackKeyForSlot(slot) || "");
             }
         );
     }
 
     /**
-     * Load API key for the dedicated TTS connection (Text to Speech page).
+     * Read the key saved for the TTS endpoint (provider + URL), whatever the
+     * main backend is. Used for the main backend and for fallbacks.
      */
-    function loadTtsApiKey(callback) {
-        if (!Tts.isTtsConfigured(Plasmoid.configuration)) {
-            callback(i18n("Text-to-speech is not configured"), "");
-            return;
-        }
-        var conn = Tts.getTtsConnection(Plasmoid.configuration);
-        if (conn.backend === "spd_say" || conn.backend === "custom_cli") {
-            callback(null, "");
-            return;
-        }
+    function readTtsEndpointKey(callback) {
         var provider = Plasmoid.configuration.ttsProviderName || "";
         var endpoint = Plasmoid.configuration.ttsApiEndpoint || "";
         var slot = Api.ttsKeySlot(provider, endpoint);
@@ -498,9 +496,51 @@ PlasmoidItem {
                     var sttSlot = Api.sttKeySlot(provider, endpoint);
                     key = fallbackKeyForSlot(sttSlot) || "";
                 }
-                callback(null, key);
+                callback(key);
             }
         );
+    }
+
+    /**
+     * Load API key for the dedicated STT connection (Speech to Text page).
+     * callback(err, apiKey, apiKeys): apiKeys is the same key by backend id,
+     * for the fallbacks (the endpoint key is only read when the endpoint
+     * backend is the main one or is listed as a fallback).
+     */
+    function loadSttApiKey(callback) {
+        if (!Stt.isSttConfigured(Plasmoid.configuration)) {
+            callback(i18n("Speech-to-text is not configured"), "", {});
+            return;
+        }
+        if (!Stt.usesBackend(Plasmoid.configuration, "openai_transcriptions")) {
+            callback(null, "", {});
+            return;
+        }
+        readSttEndpointKey(function(key) {
+            var keys = { "openai_transcriptions": key };
+            var main = Plasmoid.configuration.sttBackend || "openai_transcriptions";
+            callback(null, main === "openai_transcriptions" ? key : "", keys);
+        });
+    }
+
+    /**
+     * Load API key for the dedicated TTS connection (Text to Speech page).
+     * callback(err, apiKey, apiKeys): as for loadSttApiKey.
+     */
+    function loadTtsApiKey(callback) {
+        if (!Tts.isTtsConfigured(Plasmoid.configuration)) {
+            callback(Tts.notConfiguredMessage(Plasmoid.configuration), "", {});
+            return;
+        }
+        if (!Tts.usesBackend(Plasmoid.configuration, "openai_speech")) {
+            callback(null, "", {});
+            return;
+        }
+        readTtsEndpointKey(function(key) {
+            var keys = { "openai_speech": key };
+            var conn = Tts.getTtsConnection(Plasmoid.configuration);
+            callback(null, conn.backend === "openai_speech" ? key : "", keys);
+        });
     }
 
     property var pendingTtsOutput: null
@@ -573,7 +613,7 @@ PlasmoidItem {
         if (!ttsAvailable) {
             if (readyCb) readyCb();
             root.flushPendingTtsOutput();
-            showSttNotice(i18n("Text-to-speech is not configured. Open Text to Speech settings."));
+            showSttNotice(Tts.notConfiguredMessage(Plasmoid.configuration, true));
             return;
         }
 
@@ -601,7 +641,7 @@ PlasmoidItem {
             styleHintToUse = root.effectiveTtsStyleHint();
         }
 
-        loadTtsApiKey(function(err, apiKey) {
+        loadTtsApiKey(function(err, apiKey, apiKeys) {
             if (myGen !== root._ttsGen) {
                 if (readyCb) readyCb();
                 return;
@@ -623,11 +663,20 @@ PlasmoidItem {
                 ttsWaitUntilReady: Plasmoid.configuration.ttsWaitUntilReady,
                 ttsStyleHint: styleHintToUse,
                 ttsBackend: Plasmoid.configuration.ttsBackend,
+                ttsFallbacks: Plasmoid.configuration.ttsFallbacks,
                 ttsProviderName: Plasmoid.configuration.ttsProviderName,
                 ttsApiEndpoint: Plasmoid.configuration.ttsApiEndpoint,
                 ttsModelName: Plasmoid.configuration.ttsModelName,
                 ttsVoice: Plasmoid.configuration.ttsVoice,
                 ttsResponseFormat: Plasmoid.configuration.ttsResponseFormat,
+                ttsSpeedPercent: Plasmoid.configuration.ttsSpeedPercent,
+                ttsInstructions: Plasmoid.configuration.ttsInstructions,
+                ttsKokoroUrl: Plasmoid.configuration.ttsKokoroUrl,
+                ttsKokoroVoice: Plasmoid.configuration.ttsKokoroVoice,
+                ttsKokoroMixes: Plasmoid.configuration.ttsKokoroMixes,
+                ttsKokoroFormat: Plasmoid.configuration.ttsKokoroFormat,
+                ttsKokoroVolumePercent: Plasmoid.configuration.ttsKokoroVolumePercent,
+                ttsKokoroLangCode: Plasmoid.configuration.ttsKokoroLangCode,
                 ttsRate: Plasmoid.configuration.ttsRate,
                 ttsPitch: Plasmoid.configuration.ttsPitch,
                 ttsLanguage: Plasmoid.configuration.ttsLanguage,
@@ -639,6 +688,7 @@ PlasmoidItem {
                 config: effectiveConfig,
                 text: content,
                 apiKey: apiKey,
+                apiKeys: apiKeys,
                 onReady: readyCb,
                 isCancelled: function() {
                     return myGen !== root._ttsGen;
@@ -662,6 +712,12 @@ PlasmoidItem {
                     if (speakErr) {
                         root.flushPendingTtsOutput();
                         showSttNotice(speakErr);
+                        root.notifyKokoroUnreachable(res);
+                    } else if (res) {
+                        // A fallback spoke: say which, and still tell the user
+                        // when Kokoro was down on the way.
+                        root.showSpeechNote(res.note);
+                        root.notifyKokoroUnreachable(res.failedInfo);
                     }
                 }
             });
@@ -673,6 +729,8 @@ PlasmoidItem {
      */
     function stopSpeech() {
         ++_ttsGen;
+        if (_streamSpeech)
+            releaseStreamSpeechText(_streamSpeech);
         flushPendingTtsOutput();
         root.turnTtsStyleHint = "";
         isSpeaking = false;
@@ -681,6 +739,182 @@ PlasmoidItem {
         var stopCmd = Tts.buildStopCommand(Plasmoid.configuration.ttsBackend);
         if (stopCmd && stopCmd.length) {
             ttsExec.connectSource(stopCmd);
+        }
+    }
+
+    // Speaking a reply while it streams (ttsStreamSpeech): one state object
+    // per user turn, kept across tool-call rounds; null when not in use.
+    property var _streamSpeech: null
+
+    function streamSpeechWanted() {
+        if (!root.ttsAvailable || !Plasmoid.configuration.ttsAutoRead || !Plasmoid.configuration.ttsStreamSpeech)
+            return false;
+        if (Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice)
+            return false;
+        return true;
+    }
+
+    function newStreamSpeech() {
+        return {
+            gen: ++_ttsGen,
+            msgIndex: -1,
+            offset: 0,
+            started: false,
+            textReleased: false,
+            latestText: "",
+            queue: null,
+            buffered: [],
+            finished: false
+        };
+    }
+
+    // Show text held back by "Don't output text until TTS is ready".
+    function releaseStreamSpeechText(s) {
+        if (!s || s.textReleased)
+            return;
+        s.textReleased = true;
+        if (streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count && s.latestText) {
+            displayMessages.setProperty(streamingMessageIndex, "content", s.latestText);
+            root.chatContentChanged();
+        }
+        root.flushPendingTtsOutput();
+    }
+
+    // "Speaking…" and the speaker icon are set by onBusy, when a chunk that
+    // has something to say is actually queued.
+    function startStreamSpeechQueue(s) {
+        s.started = true;
+        loadTtsApiKey(function(err, apiKey, apiKeys) {
+            if (s.gen !== root._ttsGen) {
+                root.releaseStreamSpeechText(s);
+                return;
+            }
+            if (err) {
+                isSpeaking = false;
+                speakingMessageIndex = -1;
+                ttsStatusText = "";
+                root.releaseStreamSpeechText(s);
+                showSttNotice(err);
+                return;
+            }
+            var cfg = {
+                ttsEnabled: Plasmoid.configuration.ttsEnabled,
+                ttsStyleHint: "",
+                ttsBackend: Plasmoid.configuration.ttsBackend,
+                ttsFallbacks: Plasmoid.configuration.ttsFallbacks,
+                ttsProviderName: Plasmoid.configuration.ttsProviderName,
+                ttsApiEndpoint: Plasmoid.configuration.ttsApiEndpoint,
+                ttsModelName: Plasmoid.configuration.ttsModelName,
+                ttsVoice: Plasmoid.configuration.ttsVoice,
+                ttsResponseFormat: Plasmoid.configuration.ttsResponseFormat,
+                ttsSpeedPercent: Plasmoid.configuration.ttsSpeedPercent,
+                ttsInstructions: Plasmoid.configuration.ttsInstructions,
+                ttsKokoroUrl: Plasmoid.configuration.ttsKokoroUrl,
+                ttsKokoroVoice: Plasmoid.configuration.ttsKokoroVoice,
+                ttsKokoroMixes: Plasmoid.configuration.ttsKokoroMixes,
+                ttsKokoroFormat: Plasmoid.configuration.ttsKokoroFormat,
+                ttsKokoroVolumePercent: Plasmoid.configuration.ttsKokoroVolumePercent,
+                ttsKokoroLangCode: Plasmoid.configuration.ttsKokoroLangCode,
+                ttsRate: Plasmoid.configuration.ttsRate,
+                ttsPitch: Plasmoid.configuration.ttsPitch,
+                ttsLanguage: Plasmoid.configuration.ttsLanguage,
+                ttsCliBinary: Plasmoid.configuration.ttsCliBinary,
+                ttsCliTemplate: Plasmoid.configuration.ttsCliTemplate,
+                ttsCliExtraArgs: Plasmoid.configuration.ttsCliExtraArgs
+            };
+            s.queue = Tts.createSpeechQueue({
+                config: cfg,
+                apiKey: apiKey,
+                apiKeys: apiKeys,
+                isCancelled: function() {
+                    return s.gen !== root._ttsGen;
+                },
+                runCommand: function(cmd, cb, cmdReady) {
+                    pendingTtsRuns[cmd] = {
+                        cb: cb,
+                        onReady: cmdReady,
+                        gen: s.gen,
+                        readyCalled: false
+                    };
+                    ttsExec.connectSource(cmd);
+                },
+                onReady: function() {
+                    root.releaseStreamSpeechText(s);
+                },
+                // Nothing playing while a tool runs: clear "Speaking…".
+                onIdle: function() {
+                    if (s.gen !== root._ttsGen)
+                        return;
+                    isSpeaking = false;
+                    ttsStatusText = "";
+                },
+                onBusy: function() {
+                    if (s.gen !== root._ttsGen)
+                        return;
+                    isSpeaking = true;
+                    speakingMessageIndex = s.msgIndex;
+                    ttsStatusText = i18n("Speaking…");
+                },
+                onDone: function(speakErr, info, extra) {
+                    if (s.gen !== root._ttsGen)
+                        return;
+                    isSpeaking = false;
+                    speakingMessageIndex = -1;
+                    ttsStatusText = "";
+                    root.turnTtsStyleHint = "";
+                    if (speakErr)
+                        showSttNotice(speakErr);
+                    else if (extra)
+                        root.showSpeechNote(extra.note);
+                    // Also when a fallback spoke: Kokoro was still down.
+                    root.notifyKokoroUnreachable(info);
+                }
+            });
+            for (var i = 0; i < s.buffered.length; i++)
+                s.queue.push(s.buffered[i], root.effectiveTtsStyleHint());
+            s.buffered = [];
+            if (s.finished)
+                s.queue.finish();
+        });
+    }
+
+    /**
+     * Feed the reply text so far to the speech queue.
+     * `mode`: "chunk" while streaming; "round" at the end of a tool-call
+     * round (speak what is left, keep the queue open); "final" at the end of
+     * the user turn (speak what is left and close the queue).
+     */
+    function feedStreamSpeech(text, mode, msgIndex) {
+        var isFinal = mode === "final";
+        var takeAll = isFinal || mode === "round";
+        var s = _streamSpeech;
+        if (!s)
+            return;
+        // The bubble being spoken, for the speaker icon.
+        var idx = (msgIndex !== undefined && msgIndex >= 0) ? msgIndex : streamingMessageIndex;
+        if (idx >= 0)
+            s.msgIndex = idx;
+        s.latestText = text || "";
+        if (s.gen !== root._ttsGen) {
+            root.releaseStreamSpeechText(s);
+            return;
+        }
+        var res = Tts.takeSpeakableChunks(s.latestText, s.offset, takeAll, !s.started && s.buffered.length === 0);
+        s.offset = res.offset;
+        if (res.chunks.length > 0 && !s.started)
+            root.startStreamSpeechQueue(s);
+        for (var i = 0; i < res.chunks.length; i++) {
+            if (s.queue)
+                s.queue.push(res.chunks[i], root.effectiveTtsStyleHint());
+            else
+                s.buffered.push(res.chunks[i]);
+        }
+        if (isFinal) {
+            s.finished = true;
+            if (!s.started)
+                root.releaseStreamSpeechText(s);
+            else if (s.queue)
+                s.queue.finish();
         }
     }
 
@@ -1101,94 +1335,88 @@ PlasmoidItem {
         var absPath = String(filePath);
         var fmt = format || Stt.formatFromPath(absPath);
         var safePath = absPath.replace(/'/g, "'\\''");
-        var cli = Stt.isCliTransport(Plasmoid.configuration);
-        // Reject tiny/empty clips before paying for STT (WAV header alone is ~44 bytes;
-        // genuine speech is usually many KB).
-        var cmd = "f='" + safePath + "'; "
-            + "if [ ! -f \"$f\" ]; then echo 'ERR empty'; exit 1; fi; "
-            + "sz=$(wc -c < \"$f\" | tr -d ' '); "
-            + "if [ \"${sz:-0}\" -lt 2048 ]; then echo 'ERR tiny'; exit 2; fi; "
-            + (cli ? "echo OK" : "base64 -w0 \"$f\"");
 
-        pendingSttReads[cmd] = {
-            filePath: absPath,
-            format: fmt,
-            gen: myGen,
-            cli: cli
-        };
-        sttFileReader.connectSource(cmd);
-    }
-
-    function finishSttWithBase64(audioBase64, format, filePath, gen) {
-        if (gen !== root._sttGen) {
-            enqueueVoiceCleanup(filePath);
-            return;
-        }
-        if (!audioBase64 || audioBase64.length === 0) {
-            isTranscribing = false;
-            sttStatusText = "";
-            enqueueVoiceCleanup(filePath);
-            showSttNotice(i18n("Recording was empty or could not be read."));
-            return;
-        }
-
-        loadSttApiKey(function(err, apiKey) {
-            if (gen !== root._sttGen) {
-                enqueueVoiceCleanup(filePath);
+        // The keys come first: which backends are set up (and so whether the
+        // recording is read as base64) depends on them.
+        loadSttApiKey(function(err, apiKey, apiKeys) {
+            if (myGen !== root._sttGen) {
+                enqueueVoiceCleanup(absPath);
                 return;
             }
             if (err) {
                 isTranscribing = false;
                 sttStatusText = "";
-                enqueueVoiceCleanup(filePath);
+                enqueueVoiceCleanup(absPath);
                 showSttNotice(err);
                 return;
             }
+            var needBase64 = Stt.chainNeedsBase64(root.sttConfigSnapshot(), apiKeys);
+            // Reject tiny/empty clips before paying for STT (WAV header alone is ~44 bytes;
+            // genuine speech is usually many KB).
+            var cmd = "f='" + safePath + "'; "
+                + "if [ ! -f \"$f\" ]; then echo 'ERR empty'; exit 1; fi; "
+                + "sz=$(wc -c < \"$f\" | tr -d ' '); "
+                + "if [ \"${sz:-0}\" -lt 2048 ]; then echo 'ERR tiny'; exit 2; fi; "
+                + (needBase64 ? "base64 -w0 \"$f\"" : "echo OK");
 
-            Stt.transcribe({
-                config: Plasmoid.configuration,
-                apiKey: apiKey || "",
-                audioBase64: audioBase64,
-                format: format || "wav",
-                filePath: filePath,
-                attribution: Plasmoid.configuration.openrouterAttribution,
-                callback: function(sttErr, result) {
-                    if (gen !== root._sttGen) {
-                        enqueueVoiceCleanup(filePath);
-                        return;
-                    }
-                    isTranscribing = false;
-                    sttStatusText = "";
-                    enqueueVoiceCleanup(filePath);
-
-                    if (sttErr) {
-                        showSttNotice(sttErr);
-                        return;
-                    }
-                    var text = (result && result.text) ? String(result.text).replace(/^\s+|\s+$/g, "") : "";
-                    if (!text.length) {
-                        showSttNotice(i18n("No speech detected."));
-                        return;
-                    }
-                    if (!root.sendMessage(text, [], { fromVoice: true })) {
-                        showSttNotice(i18n("Could not send transcribed message."));
-                    }
-                }
-            });
+            pendingSttReads[cmd] = {
+                filePath: absPath,
+                format: fmt,
+                gen: myGen,
+                base64: needBase64,
+                apiKey: apiKey,
+                apiKeys: apiKeys
+            };
+            sttFileReader.connectSource(cmd);
         });
     }
 
-    function finishSttWithCli(filePath, format, gen) {
+    // The speech-to-text settings as a plain object (the fallback code copies
+    // it per backend, which needs ordinary properties).
+    function sttConfigSnapshot() {
+        var c = Plasmoid.configuration;
+        return {
+            sttEnabled: c.sttEnabled,
+            sttBackend: c.sttBackend,
+            sttFallbacks: c.sttFallbacks,
+            sttBackendModels: c.sttBackendModels,
+            sttProviderName: c.sttProviderName,
+            sttApiEndpoint: c.sttApiEndpoint,
+            sttModelName: c.sttModelName,
+            sttLanguage: c.sttLanguage,
+            sttCliBinary: c.sttCliBinary,
+            sttCliTask: c.sttCliTask,
+            sttCliDevice: c.sttCliDevice,
+            sttCliFp16: c.sttCliFp16,
+            sttCliThreads: c.sttCliThreads,
+            sttCliInitialPrompt: c.sttCliInitialPrompt,
+            sttCliExtraArgs: c.sttCliExtraArgs,
+            sttCppBinary: c.sttCppBinary,
+            sttCppModelDirs: c.sttCppModelDirs
+        };
+    }
+
+    // The recording goes to the main backend and, on a failure, to each
+    // fallback in turn. It is deleted once, after the last attempt.
+    function finishStt(info, audioBase64) {
+        var filePath = info.filePath;
+        var gen = info.gen;
         if (gen !== root._sttGen) {
             enqueueVoiceCleanup(filePath);
             return;
         }
 
-        Stt.transcribe({
-            config: Plasmoid.configuration,
+        Stt.transcribeChain({
+            config: root.sttConfigSnapshot(),
+            apiKey: info.apiKey || "",
+            apiKeys: info.apiKeys || {},
+            audioBase64: audioBase64 || "",
+            format: info.format || "wav",
             filePath: filePath,
-            format: format || "wav",
             attribution: Plasmoid.configuration.openrouterAttribution,
+            isCancelled: function() {
+                return gen !== root._sttGen;
+            },
             runCommand: function(cmd, cb) {
                 if (gen !== root._sttGen) {
                     cb(i18n("Transcription canceled"), null);
@@ -1197,24 +1425,19 @@ PlasmoidItem {
                 pendingWhisperRuns[cmd] = { cb: cb, gen: gen, filePath: filePath };
                 whisperExec.connectSource(cmd);
             },
-            callback: function(sttErr, result) {
-                if (gen !== root._sttGen) {
-                    enqueueVoiceCleanup(filePath);
+            callback: function(sttErr, result, meta) {
+                enqueueVoiceCleanup(filePath);
+                if (gen !== root._sttGen)
                     return;
-                }
                 isTranscribing = false;
                 sttStatusText = "";
-                enqueueVoiceCleanup(filePath);
 
                 if (sttErr) {
                     showSttNotice(sttErr);
                     return;
                 }
+                root.showSpeechNote(meta ? meta.note : "");
                 var text = (result && result.text) ? String(result.text).replace(/^\s+|\s+$/g, "") : "";
-                if (!text.length) {
-                    showSttNotice(i18n("No speech detected."));
-                    return;
-                }
                 if (!root.sendMessage(text, [], { fromVoice: true })) {
                     showSttNotice(i18n("Could not send transcribed message."));
                 }
@@ -1308,10 +1531,7 @@ PlasmoidItem {
                     root.showSttNotice(i18n("Failed to read recorded audio."));
                 return;
             }
-            if (info.cli)
-                root.finishSttWithCli(info.filePath, info.format, info.gen);
-            else
-                root.finishSttWithBase64(stdout, info.format, info.filePath, info.gen);
+            root.finishStt(info, info.base64 ? stdout : "");
         }
     }
 
@@ -3666,6 +3886,14 @@ PlasmoidItem {
         }
         // Add a placeholder assistant message for streaming
         streamingMessageIndex = root.appendDisplayMessage("assistant", "", { turnId: currentTurnId });
+        if (toolCallDepth === 0)
+            root._streamSpeech = root.streamSpeechWanted() ? root.newStreamSpeech() : null;
+        else if (root._streamSpeech)
+        {
+            // each request streams its own text from the start
+            root._streamSpeech.offset = 0;
+            root._streamSpeech.latestText = "";
+        }
 
         // Build messages array from ListModel, capping to avoid unbounded growth
         var messages = [];
@@ -3825,9 +4053,15 @@ PlasmoidItem {
                     requestUsage = root.priceRequestUsage(usage);
                 },
                 onChunk: function(delta, accumulated) {
-                    var suppressText = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && Plasmoid.configuration.ttsWaitUntilReady;
-                    if (suppressText && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
-                        suppressText = false;
+                    var suppressText;
+                    if (root._streamSpeech) {
+                        root.feedStreamSpeech(accumulated, "chunk");
+                        suppressText = Plasmoid.configuration.ttsWaitUntilReady && !root._streamSpeech.textReleased;
+                    } else {
+                        suppressText = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && Plasmoid.configuration.ttsWaitUntilReady;
+                        if (suppressText && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
+                            suppressText = false;
+                        }
                     }
                     if (!suppressText && streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count) {
                         displayMessages.setProperty(streamingMessageIndex, "content", accumulated);
@@ -3852,6 +4086,8 @@ PlasmoidItem {
                 // Handle tool calls
                 var limitApplies = enableToolCallLimit && !DriverManager.isSessionActive;
                 if (toolCalls && toolCalls.length > 0 && (!limitApplies || toolCallDepth < maxToolCallDepth)) {
+                    // Speak the rest of this round's text before the tools run.
+                    root.feedStreamSpeech(fullText || "", "round");
                     toolCallDepth++;
                     // Append the assistant's tool_call message to chat history
                     var thinkingJson = (assistantMsg && assistantMsg.thinkingBlocks && assistantMsg.thinkingBlocks.length > 0)
@@ -3949,6 +4185,8 @@ PlasmoidItem {
                         displayMessages.remove(streamingMessageIndex);
                     }
                     streamingMessageIndex = -1;
+                    // Finish whatever was already being spoken.
+                    root.feedStreamSpeech("", "final");
                     root.appendDisplayMessage("error", "Error: " + error, { turnId: currentTurnId });
                 } else {
                     var effectiveStyle = root.effectiveTtsStyleHint();
@@ -3966,11 +4204,15 @@ PlasmoidItem {
                         usage_json: requestUsageJson
                     });
                     
-                    var allowStreamSpeech = root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && fullText && fullText.length > 0;
+                    // Spoken while streaming: only the rest is left to say.
+                    var streamSpeech = root._streamSpeech;
+                    var allowStreamSpeech = !streamSpeech && root.ttsAvailable && Plasmoid.configuration.ttsAutoRead && fullText && fullText.length > 0;
                     if (allowStreamSpeech && Plasmoid.configuration.ttsAutoReadOnlyVoicePrompted && !root._lastPromptWasVoice) {
                         allowStreamSpeech = false;
                     }
-                    var waitStreamTts = allowStreamSpeech && Plasmoid.configuration.ttsWaitUntilReady;
+                    var waitStreamTts = streamSpeech
+                        ? (Plasmoid.configuration.ttsWaitUntilReady && !streamSpeech.textReleased && fullText.length > 0)
+                        : (allowStreamSpeech && Plasmoid.configuration.ttsWaitUntilReady);
 
                     if (streamingMessageIndex >= 0 && streamingMessageIndex < displayMessages.count) {
                         displayMessages.setProperty(streamingMessageIndex, "apiMsgId", astMsgId);
@@ -3997,7 +4239,9 @@ PlasmoidItem {
                     saveChat();
                     triggerBackgroundCompactionIfNeeded();
 
-                    if (allowStreamSpeech) {
+                    if (streamSpeech) {
+                        root.feedStreamSpeech(fullText, "final", msgIdxForSpeak);
+                    } else if (allowStreamSpeech) {
                         root.speakMessage(fullText, msgIdxForSpeak, function() {
                             root.flushPendingTtsOutput();
                         }, effectiveStyle);
@@ -4044,6 +4288,107 @@ PlasmoidItem {
         var escapedMessage = (message || "").replace(/'/g, "'\\''");
         var cmd = "notify-send -- '" + escapedTitle + "' '" + escapedMessage + "'";
         executable.connectSource(cmd);
+    }
+
+    // Kokoro (local) could not be reached while speaking (curl could not
+    // connect, after the synthesize command's own retries). One notification
+    // per burst of failures: the Start action runs the start command for a
+    // stopped Kokoro unit if systemd lists one; with none known, the action
+    // opens the settings window instead. The lookup is read-only.
+    property double _kokoroNoteAt: 0
+    property int _kokoroCmdSeq: 0
+    property var _kokoroLookups: ({})
+    property var kokoroNotification: null
+
+    P5Support.DataSource {
+        id: kokoroCmdSource
+        engine: "executable"
+        connectedSources: []
+        onNewData: function(source, data) {
+            var exitCode = data["exit code"];
+            if (exitCode === undefined)
+                return;
+            disconnectSource(source);
+            var failed = exitCode !== 0 && exitCode !== "0";
+            if (/^: plasmallm-kokoro-units-/.test(source)) {
+                var endpoint = root._kokoroLookups[source];
+                delete root._kokoroLookups[source];
+                if (endpoint !== undefined)
+                    root.showKokoroNotification(endpoint, failed ? "" : KokoroSetup.pickStartUnit(data.stdout || ""));
+            } else if (/^: plasmallm-kokoro-start-/.test(source) && failed) {
+                root.showSttNotice(i18n("Kokoro could not be started: %1",
+                    String(data.stderr || "").replace(/^\s+|\s+$/g, "") || i18n("exit %1", exitCode)));
+            }
+        }
+    }
+
+    Component {
+        id: kokoroNotificationComponent
+        Notification {
+            id: kokoroNote
+            property string unit: ""
+            property bool closing: false
+            componentName: "plasma_workspace"
+            eventId: "notification"
+            iconName: "dialog-warning"
+            autoDelete: false
+            property NotificationAction startAction: NotificationAction {
+                label: i18n("Start")
+                onActivated: root.startKokoroUnit(kokoroNote.unit)
+            }
+            property NotificationAction settingsAction: NotificationAction {
+                label: i18n("Open settings")
+                onActivated: Plasmoid.internalAction("configure").trigger()
+            }
+            actions: unit.length > 0 ? [startAction] : [settingsAction]
+            onClosed: {
+                if (root.kokoroNotification === kokoroNote)
+                    root.kokoroNotification = null;
+                if (!kokoroNote.closing)
+                    kokoroNote.destroy();
+            }
+        }
+    }
+
+    /** info is what Tts.speak / the speech queue hand back with a failure. */
+    function notifyKokoroUnreachable(info) {
+        if (!info || !info.unreachable || info.backend !== "kokoro_local")
+            return;
+        var now = Date.now();
+        if (!KokoroSetup.notifyAllowed(root._kokoroNoteAt, now))
+            return;
+        root._kokoroNoteAt = now;
+        var cmd = KokoroSetup.buildUnitLookupCommand(now + "-" + (++root._kokoroCmdSeq));
+        root._kokoroLookups[cmd] = info.endpoint || "";
+        kokoroCmdSource.connectSource(cmd);
+    }
+
+    function showKokoroNotification(endpoint, unit) {
+        var old = root.kokoroNotification;
+        if (old) {
+            root.kokoroNotification = null;
+            old.closing = true;
+            old.close();
+            old.destroy(2000);
+        }
+        // Plasma renders the body as markup.
+        var text = i18n("Kokoro isn't running at %1.", endpoint)
+            .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        var note = kokoroNotificationComponent.createObject(root, {
+            unit: unit || "",
+            title: i18n("PlasmaLLM"),
+            text: text
+        });
+        if (!note)
+            return;
+        root.kokoroNotification = note;
+        note.sendEvent();
+    }
+
+    function startKokoroUnit(unit) {
+        if (!unit)
+            return;
+        kokoroCmdSource.connectSource(KokoroSetup.buildStartCommand(unit, Date.now() + "-" + (++root._kokoroCmdSeq)));
     }
 
     // Approve / Deny from the desktop notification while the panel is closed.
